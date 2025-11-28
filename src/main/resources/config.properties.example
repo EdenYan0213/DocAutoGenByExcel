@@ -1,0 +1,12 @@
+# Excel数据驱动Word多模块动态表格生成工具 - 配置文件示例
+# 复制此文件为config.properties并填写实际路径
+
+# Excel文件路径（必填）
+excel.path=D:/data.xlsx
+
+# Word模板文件路径（必填）
+word.path=D:/template.docx
+
+# 输出目录路径（可选，默认为Excel文件同目录）
+output.path=D:/output
+
