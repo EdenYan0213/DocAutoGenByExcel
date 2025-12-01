@@ -33,13 +33,41 @@ public class TestDataGenerator {
             // 添加空行
             document.createParagraph();
 
-            // 添加章节 5.3 功能测试
+            // 添加章节 4.3 功能测试（匹配图片中的格式）
             XWPFParagraph section1 = document.createParagraph();
             XWPFRun run1 = section1.createRun();
-            run1.setText("5.3 功能测试");
+            run1.setText("4.3 功能测试");
             run1.setBold(true);
             run1.setFontSize(14);
 
+            // 添加空行
+            document.createParagraph();
+            
+            // 添加表格（2列格式：左列标签，右列数据）
+            XWPFTable table1 = document.createTable(7, 2); // 7行2列
+            
+            // 设置表格样式
+            table1.setWidth("100%");
+            
+            // 填充表格：左列是标签，右列留空待填充
+            setCellValue(table1, 0, 0, "测试项名称");
+            setCellValue(table1, 0, 1, "标识");
+            
+            setCellValue(table1, 1, 0, "测试内容");
+            setCellValue(table1, 1, 1, "");
+            
+            setCellValue(table1, 2, 0, "测试策略与方法");
+            setCellValue(table1, 2, 1, "");
+            
+            setCellValue(table1, 3, 0, "判定准则");
+            setCellValue(table1, 3, 1, "");
+            
+            setCellValue(table1, 4, 0, "测试终止条件");
+            setCellValue(table1, 4, 1, "");
+            
+            setCellValue(table1, 5, 0, "追踪关系");
+            setCellValue(table1, 5, 1, "");
+            
             // 添加空行
             document.createParagraph();
 
@@ -87,22 +115,22 @@ public class TestDataGenerator {
                 cell.setCellStyle(headerStyle);
             }
 
-            // 创建测试数据 - 模块5.3的数据
-            createTestDataRow(sheet, 1, "5.3", "登录功能", "F001", 
+            // 创建测试数据 - 模块4.3的数据（匹配Word模板）
+            createTestDataRow(sheet, 1, "4.3", "登录功能", "F001", 
                 "验证用户登录功能，包含正常登录、密码错误、账户锁定等场景",
                 "1) 输入正确的用户名和密码；2) 输入错误的密码；3) 输入已锁定的账户",
                 "1) 正常登录应跳转到首页；2) 密码错误应提示\"密码不正确\"；3) 账户锁定应提示\"账户已被锁定\"",
                 "测试用例执行完成或出现阻塞性缺陷",
                 "需求文档V1.0");
 
-            createTestDataRow(sheet, 2, "5.3", "注册功能", "F002",
+            createTestDataRow(sheet, 2, "4.3", "注册功能", "F002",
                 "验证用户注册功能，包含正常注册、邮箱重复、密码强度验证等场景",
                 "1) 输入有效的邮箱和密码；2) 输入已存在的邮箱；3) 输入弱密码",
                 "1) 正常注册应创建账户并发送验证邮件；2) 邮箱重复应提示\"该邮箱已被注册\"；3) 弱密码应提示\"密码强度不足\"",
                 "测试用例执行完成或出现阻塞性缺陷",
                 "需求文档V1.0");
 
-            createTestDataRow(sheet, 3, "5.3", "密码重置", "F003",
+            createTestDataRow(sheet, 3, "4.3", "密码重置", "F003",
                 "验证用户密码重置功能，包含发送重置邮件、验证重置链接、设置新密码等场景",
                 "1) 输入已注册的邮箱；2) 点击重置链接；3) 设置新密码",
                 "1) 应发送包含重置链接的邮件；2) 重置链接应有效；3) 新密码应成功设置",
@@ -157,6 +185,29 @@ public class TestDataGenerator {
         row.createCell(5).setCellValue(criteria);
         row.createCell(6).setCellValue(stopCondition);
         row.createCell(7).setCellValue(trace);
+    }
+    
+    /**
+     * 设置表格单元格值
+     */
+    private static void setCellValue(XWPFTable table, int row, int col, String value) {
+        XWPFTableRow tableRow = table.getRow(row);
+        if (tableRow == null) {
+            return;
+        }
+        XWPFTableCell cell = tableRow.getCell(col);
+        if (cell == null) {
+            cell = tableRow.createCell();
+        }
+        // 清空现有内容
+        cell.removeParagraph(0);
+        while (cell.getParagraphs().size() > 0) {
+            cell.removeParagraph(0);
+        }
+        // 设置新内容
+        XWPFParagraph para = cell.addParagraph();
+        XWPFRun run = para.createRun();
+        run.setText(value != null ? value : "");
     }
 
     /**

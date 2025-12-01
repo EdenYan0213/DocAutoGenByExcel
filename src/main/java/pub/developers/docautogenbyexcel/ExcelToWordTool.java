@@ -98,7 +98,9 @@ public class ExcelToWordTool {
             } else {
                 // 默认输出路径为Excel文件同目录
                 File excelFile = new File(config.getExcelPath());
-                config.setOutputPath(excelFile.getParent());
+                String parentPath = excelFile.getParent();
+                // 如果没有父目录（例如只是文件名），使用当前目录
+                config.setOutputPath(parentPath != null ? parentPath : ".");
             }
         }
 
@@ -109,6 +111,17 @@ public class ExcelToWordTool {
      * 验证文件路径
      */
     private static void validatePaths(ConfigLoader config) throws Exception {
+        // 验证配置不为空
+        if (config.getExcelPath() == null || config.getExcelPath().trim().isEmpty()) {
+            throw new Exception("Excel文件路径不能为空");
+        }
+        if (config.getWordPath() == null || config.getWordPath().trim().isEmpty()) {
+            throw new Exception("Word模板文件路径不能为空");
+        }
+        if (config.getOutputPath() == null || config.getOutputPath().trim().isEmpty()) {
+            throw new Exception("输出路径不能为空");
+        }
+        
         // 验证Excel文件
         File excelFile = new File(config.getExcelPath());
         if (!excelFile.exists()) {

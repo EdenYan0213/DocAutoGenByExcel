@@ -18,24 +18,17 @@ public class ExcelReader {
     
     // 必填列名
     private static final String COL_MODULE_NUMBER = "模块编号";
-    private static final String COL_TEST_NAME = "testName";
-    private static final String COL_ID = "id";
-    private static final String COL_CONTENT = "content";
-    private static final String COL_STRATEGY = "strategy";
-    private static final String COL_CRITERIA = "criteria";
-    private static final String COL_STOP_CONDITION = "stopCondition";
-    private static final String COL_TRACE = "trace";
     
-    private static final Set<String> REQUIRED_COLUMNS = new HashSet<>(Arrays.asList(
-            COL_MODULE_NUMBER, COL_TEST_NAME, COL_ID, COL_CONTENT,
-            COL_STRATEGY, COL_CRITERIA, COL_STOP_CONDITION, COL_TRACE
+    // 保留这些列名作为兼容性检查，但不再强制要求
+    private static final Set<String> OPTIONAL_COLUMNS = new HashSet<>(Arrays.asList(
+            "testName", "id", "content", "strategy", "criteria", "stopCondition", "trace"
     ));
 
     /**
      * 读取Excel文件并返回按模块分组的数据
      *
      * @param excelPath Excel文件路径
-     * @return Map<模块编号, ModuleData>
+     * @return Map<模块编号, ModuleData>，同时返回列名列表
      * @throws Exception 读取异常
      */
     public Map<String, ModuleData> readExcel(String excelPath) throws Exception {
@@ -59,29 +52,29 @@ public class ExcelReader {
                 throw new Exception("Excel文件为空或没有数据");
             }
 
-            // 读取表头，确定列索引
+            // 读取表头，确定列索引和列名
             Row headerRow = sheet.getRow(0);
             if (headerRow == null) {
                 throw new Exception("Excel文件缺少表头行");
             }
 
+            // 读取所有列名（按顺序）
+            List<String> columnNames = new ArrayList<>();
             Map<String, Integer> columnIndexMap = new HashMap<>();
-            for (Cell cell : headerRow) {
+            
+            for (int i = 0; i < headerRow.getLastCellNum(); i++) {
+                Cell cell = headerRow.getCell(i);
                 String cellValue = getCellValueAsString(cell);
                 if (cellValue != null && !cellValue.trim().isEmpty()) {
-                    columnIndexMap.put(cellValue.trim(), cell.getColumnIndex());
+                    String columnName = cellValue.trim();
+                    columnNames.add(columnName);
+                    columnIndexMap.put(columnName, i);
                 }
             }
 
-            // 验证必填列
-            List<String> missingColumns = new ArrayList<>();
-            for (String requiredCol : REQUIRED_COLUMNS) {
-                if (!columnIndexMap.containsKey(requiredCol)) {
-                    missingColumns.add(requiredCol);
-                }
-            }
-            if (!missingColumns.isEmpty()) {
-                throw new Exception("Excel缺少必填列: " + String.join(", ", missingColumns));
+            // 验证必填列（模块编号）
+            if (!columnIndexMap.containsKey(COL_MODULE_NUMBER)) {
+                throw new Exception("Excel缺少必填列: " + COL_MODULE_NUMBER);
             }
 
             // 读取数据行
@@ -99,8 +92,8 @@ public class ExcelReader {
                     continue;
                 }
 
-                // 读取测试用例数据
-                TestCase testCase = readTestCase(row, columnIndexMap);
+                // 读取测试用例数据（包含所有列）
+                TestCase testCase = readTestCase(row, columnIndexMap, columnNames);
                 if (testCase == null) {
                     continue;
                 }
@@ -116,7 +109,7 @@ public class ExcelReader {
                 dataCount++;
             }
 
-            System.out.println("读取完成（共" + dataCount + "条数据，" + moduleDataMap.size() + "个模块）");
+            System.out.println("读取完成（共" + dataCount + "条数据，" + moduleDataMap.size() + "个模块，共" + columnNames.size() + "列）");
             return moduleDataMap;
 
         } catch (IOException e) {
@@ -125,35 +118,30 @@ public class ExcelReader {
     }
 
     /**
-     * 读取一行数据，转换为TestCase对象
+     * 读取一行数据，转换为TestCase对象（包含所有列）
      */
-    private TestCase readTestCase(Row row, Map<String, Integer> columnIndexMap) {
+    private TestCase readTestCase(Row row, Map<String, Integer> columnIndexMap, List<String> columnNames) {
         String moduleNumber = getCellValue(row, columnIndexMap.get(COL_MODULE_NUMBER));
-        String testName = getCellValue(row, columnIndexMap.get(COL_TEST_NAME));
-        String id = getCellValue(row, columnIndexMap.get(COL_ID));
-        String content = getCellValue(row, columnIndexMap.get(COL_CONTENT));
-        String strategy = getCellValue(row, columnIndexMap.get(COL_STRATEGY));
-        String criteria = getCellValue(row, columnIndexMap.get(COL_CRITERIA));
-        String stopCondition = getCellValue(row, columnIndexMap.get(COL_STOP_CONDITION));
-        String trace = getCellValue(row, columnIndexMap.get(COL_TRACE));
-
+        
         // 验证必填字段
-        if (moduleNumber == null || moduleNumber.trim().isEmpty() ||
-            testName == null || testName.trim().isEmpty() ||
-            id == null || id.trim().isEmpty()) {
+        if (moduleNumber == null || moduleNumber.trim().isEmpty()) {
             return null;
         }
 
-        return new TestCase(
-                moduleNumber.trim(),
-                testName.trim(),
-                id.trim(),
-                content != null ? content.trim() : "",
-                strategy != null ? strategy.trim() : "",
-                criteria != null ? criteria.trim() : "",
-                stopCondition != null ? stopCondition.trim() : "",
-                trace != null ? trace.trim() : ""
-        );
+        TestCase testCase = new TestCase(moduleNumber.trim());
+        
+        // 读取所有列的数据
+        for (String columnName : columnNames) {
+            // 跳过模块编号列（已经设置）
+            if (COL_MODULE_NUMBER.equals(columnName)) {
+                continue;
+            }
+            
+            String value = getCellValue(row, columnIndexMap.get(columnName));
+            testCase.addColumnData(columnName, value != null ? value.trim() : "");
+        }
+
+        return testCase;
     }
 
     /**
