@@ -29,15 +29,11 @@ public class ExcelToWordTool {
             Map<String, pub.developers.docautogenbyexcel.model.ModuleData> moduleDataMap = 
                 excelReader.readExcel(config.getExcelPath());
             
-            // 生成输出文件路径
+            // 生成输出文件路径（generateOutputFileName 已经确保目录存在）
             String outputPath = FileUtil.generateOutputFileName(
                 config.getWordPath(), 
                 config.getOutputPath()
             );
-            
-            // 确保输出目录存在
-            File outputFile = new File(outputPath);
-            FileUtil.ensureDirectoryExists(outputFile.getParent());
             
             // 处理Word模板
             System.out.println("开始处理Word模板");

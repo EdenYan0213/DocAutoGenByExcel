@@ -1,6 +1,7 @@
 package pub.developers.docautogenbyexcel.processor;
 
 import org.apache.poi.xwpf.usermodel.*;
+import org.apache.poi.openxml4j.exceptions.OLE2NotOfficeXmlFileException;
 import org.openxmlformats.schemas.wordprocessingml.x2006.main.*;
 import pub.developers.docautogenbyexcel.model.ModuleData;
 import pub.developers.docautogenbyexcel.model.TestCase;
@@ -36,6 +37,17 @@ public class WordProcessor {
      */
     public int processWord(String templatePath, String outputPath, 
                           java.util.Map<String, ModuleData> moduleDataMap) throws Exception {
+        // 检查文件格式
+        String lowerPath = templatePath.toLowerCase();
+        if (lowerPath.endsWith(".doc") && !lowerPath.endsWith(".docx")) {
+            throw new Exception("不支持旧版Word格式(.doc文件)。请将文件转换为.docx格式后再使用。\n" +
+                    "转换方法：\n" +
+                    "1. 使用Microsoft Word打开.doc文件\n" +
+                    "2. 选择'文件' -> '另存为'\n" +
+                    "3. 在'文件类型'中选择'Word文档(*.docx)'\n" +
+                    "4. 保存后使用新的.docx文件");
+        }
+        
         try (FileInputStream fis = new FileInputStream(templatePath);
              XWPFDocument document = new XWPFDocument(fis)) {
 
@@ -208,310 +220,109 @@ public class WordProcessor {
 
                 // 检查章节后是否已有表格
                 CTTbl existingTable = findTableCttblAfterParagraph(body, sectionPara.getCTP());
+                
+                // 找到该章节的结束位置（用于插入子章节）
+                XWPFParagraph lastElementInSection = findLastElementInSection(document, sectionPara, sectionNumber);
+                System.out.println("模块" + sectionNumber + "的最后元素: " + (lastElementInSection != null ? lastElementInSection.getText() : "null"));
+                
+                // 保存第一个表格作为模板（如果存在）
+                XWPFTable templateTable = null;
                 if (existingTable != null) {
-                    // 如果已有表格，先为第一个测试用例创建子章节（4.3.1），然后填充表格
-                    TestCase firstTestCase = moduleData.getTestCases().get(0);
-                    String firstSubSectionNumber = sectionNumber + ".1";
-                    
-                    // 检查是否已经存在4.3.1子章节
-                    XWPFParagraph firstSubSectionPara = findSectionParagraph(document, firstSubSectionNumber);
-                    if (firstSubSectionPara == null) {
-                        // 如果不存在，创建第一个子章节（在表格前插入）
-                        // 找到表格在body中的位置
-                        int tableIndex = -1;
-                        for (int i = 0; i < body.sizeOfTblArray(); i++) {
-                            if (body.getTblArray(i) == existingTable) {
-                                tableIndex = i;
-                                break;
-                            }
-                        }
-                        
-                        // 找到表格前的段落位置（应该是sectionPara）
-                        int sectionParaIndex = -1;
-                        for (int i = 0; i < body.sizeOfPArray(); i++) {
-                            if (body.getPArray(i) == sectionPara.getCTP()) {
-                                sectionParaIndex = i;
-                                break;
-                            }
-                        }
-                        
-                        if (sectionParaIndex >= 0) {
-                            // 在章节段落后插入第一个子章节
-                            firstSubSectionPara = createSubSectionParagraph(
-                                document, sectionPara, firstSubSectionNumber, firstTestCase.getTestName());
-                        }
-                    }
-                    
-                    // 填充第一个表格
-                    if (firstSubSectionPara != null) {
-                        // 查找子章节后的表格（应该是existingTable）
-                        CTTbl tableAfterSubSection = findTableCttblAfterParagraph(body, firstSubSectionPara.getCTP());
-                        if (tableAfterSubSection != null) {
-                            XWPFTable table = new XWPFTable(tableAfterSubSection, document);
-                            fillTableData(table, firstTestCase);
-                        } else {
-                            // 如果找不到，使用existingTable
-                            XWPFTable table = new XWPFTable(existingTable, document);
-                            fillTableData(table, firstTestCase);
-                        }
-                    } else {
-                        // 如果创建失败，直接填充表格
-                        XWPFTable table = new XWPFTable(existingTable, document);
-                        fillTableData(table, firstTestCase);
-                    }
-                    System.out.println("模块" + sectionNumber + "第一个表格填充完成");
-                    
-                    // 保存第一个表格作为模板，用于复制
-                    XWPFTable templateTable = new XWPFTable(existingTable, document);
-                    
-                    // 如果这是第一个模板表格，保存为全局模板
+                    templateTable = new XWPFTable(existingTable, document);
                     if (globalTemplateTable == null) {
                         globalTemplateTable = templateTable;
                         System.out.println("保存模块" + sectionNumber + "的表格作为全局模板");
                     }
+                }
+                
+                // 处理所有测试用例，按顺序创建子章节和表格
+                List<TestCase> testCases = moduleData.getTestCases();
+                
+                // 找到该章节下已存在的子章节（模板子章节，如 XX测试）
+                List<XWPFParagraph> existingSubSectionParas = findExistingSubSectionsInSection(
+                    document, sectionPara, sectionNumber);
+                System.out.println("模块" + sectionNumber + "下已有" + existingSubSectionParas.size() + "个子章节");
+                
+                XWPFParagraph currentInsertPoint = lastElementInSection != null ? lastElementInSection : sectionPara;
+                System.out.println("初始插入点: " + (currentInsertPoint != null ? currentInsertPoint.getText() : "null"));
+                
+                for (int i = 0; i < testCases.size(); i++) {
+                    TestCase testCase = testCases.get(i);
+                    int sequenceNumber = i + 1;
+                    String subSectionNumber = sectionNumber + "." + sequenceNumber;
                     
-                    // 如果还有更多测试用例，为剩余的测试用例创建子章节和表格
-                    if (moduleData.getTestCaseCount() > 1) {
-                        // 找到第一个表格后的位置，作为插入点
-                        // 使用更可靠的方法：找到表格在body中的位置，然后找到表格后的第一个段落
-                        int tableIndexInBody = -1;
-                        for (int i = 0; i < body.sizeOfTblArray(); i++) {
-                            if (body.getTblArray(i) == existingTable) {
-                                tableIndexInBody = i;
-                                break;
-                            }
-                        }
+                    // 检查是否有可复用的已存在子章节（按顺序复用）
+                    if (i < existingSubSectionParas.size()) {
+                        // 复用已存在的子章节：修改标题和填充表格
+                        XWPFParagraph existingSubSection = existingSubSectionParas.get(i);
+                        System.out.println("替换已存在的子章节为: " + subSectionNumber + " " + testCase.getTestName() + "测试");
                         
-                        // 找到第一个表格后的位置，作为插入点
-                        // 方法：直接在第一个表格后创建空段落作为插入点，不依赖查找逻辑
-                        CTBody body2 = document.getDocument().getBody();
-                        XWPFParagraph insertAfterPara = null;
+                        // 修改子章节标题
+                        updateParagraphText(existingSubSection, subSectionNumber + " " + testCase.getTestName() + "测试");
                         
-                        // 找到第一个子章节后的表格
-                        CTTbl firstTable = findTableCttblAfterParagraph(body, firstSubSectionPara.getCTP());
-                        if (firstTable == null) {
-                            firstTable = existingTable; // 如果找不到，使用existingTable
-                        }
-                        
-                        if (firstTable != null) {
-                            // 在表格后创建空段落作为插入点
-                            org.apache.xmlbeans.XmlCursor tableCursor = firstTable.newCursor();
-                            tableCursor.toEndToken();
-                            tableCursor.toNextToken();
+                        // 填充表格
+                        CTTbl tableAfterSub = findTableCttblAfterParagraph(body, existingSubSection.getCTP());
+                        if (tableAfterSub != null) {
+                            XWPFTable table = new XWPFTable(tableAfterSub, document);
+                            fillTableData(table, testCase);
+                            System.out.println("子章节" + subSectionNumber + "表格填充完成");
                             
-                            // 找到表格后的段落位置
-                            int insertPos = -1;
-                            for (int k = 0; k < body2.sizeOfPArray(); k++) {
-                                CTP checkPara = body2.getPArray(k);
-                                org.apache.xmlbeans.XmlCursor checkCursor = checkPara.newCursor();
-                                if (checkCursor.comparePosition(tableCursor) > 0) {
-                                    insertPos = k;
-                                    checkCursor.close();
-                                    break;
+                            // 更新表格前的Caption（如果有的话）
+                            updateTableCaption(document, existingSubSection, subSectionNumber, testCase.getTestName());
+                        }
+                        // 更新插入点为表格后面（确保新子章节在表格后面创建）
+                        currentInsertPoint = findInsertPointAfterTable(document, existingSubSection);
+                    } else {
+                        // 没有更多已存在的子章节，创建新的
+                        System.out.println("创建子章节: " + subSectionNumber + " " + testCase.getTestName() + "测试");
+                        System.out.println("当前插入点: " + (currentInsertPoint != null ? currentInsertPoint.getText() : "null"));
+                        XWPFParagraph subSectionPara = createSubSectionParagraph(
+                            document, currentInsertPoint, subSectionNumber, testCase.getTestName());
+                        
+                        // 始终为新创建的子章节创建新表格（不复用已存在的表格）
+                        if (templateTable != null) {
+                            // 如果有模板，复制模板表格
+                            System.out.println("复制模板表格到子章节" + subSectionNumber + "后");
+                            CTTbl newCttbl = copyTable(document, subSectionPara.getCTP(), templateTable.getCTTbl());
+                            if (newCttbl != null) {
+                                XWPFTable newTable = new XWPFTable(newCttbl, document);
+                                System.out.println("模板表格复制成功，行数: " + newTable.getNumberOfRows());
+                                
+                                // 清空数据列（只保留标签列）
+                                for (int rowIdx = 0; rowIdx < newTable.getNumberOfRows(); rowIdx++) {
+                                    XWPFTableRow row = newTable.getRow(rowIdx);
+                                    if (row == null) continue;
+                                    
+                                    int cellCount = row.getTableCells().size();
+                                    if (rowIdx == 0 && cellCount >= 4) {
+                                        // 第一行：清空单元格1和3（数据列）
+                                        clearCellContent(row.getCell(1));
+                                        clearCellContent(row.getCell(3));
+                                    } else if (cellCount >= 2) {
+                                        // 其他行：清空单元格1及后续单元格（数据列）
+                                        for (int j = 1; j < cellCount; j++) {
+                                            clearCellContent(row.getCell(j));
+                                        }
+                                    }
                                 }
-                                checkCursor.close();
-                            }
-                            tableCursor.close();
-                            
-                            if (insertPos >= 0) {
-                                // 在表格后插入空段落
-                                CTP newPara = body2.insertNewP(insertPos);
-                                insertAfterPara = new XWPFParagraph(newPara, document);
-                                System.out.println("在第一个表格后创建空段落作为插入点（位置: " + insertPos + "）");
+                                
+                                // 填充表格数据
+                                fillTableData(newTable, testCase);
+                                System.out.println("表格数据填充完成");
                             } else {
-                                // 如果找不到，使用firstSubSectionPara
-                                insertAfterPara = firstSubSectionPara;
-                                System.out.println("使用第一个子章节作为插入点");
+                                System.err.println("复制模板表格失败");
                             }
                         } else {
-                            // 如果找不到表格，使用firstSubSectionPara
-                            insertAfterPara = firstSubSectionPara;
-                            System.out.println("找不到第一个表格，使用第一个子章节作为插入点");
+                            // 如果没有模板，创建新表格
+                            insertNewTableAfterParagraph(document, subSectionPara.getCTP(), testCase);
                         }
                         
-                        // 为剩余的测试用例创建子章节和表格
-                        List<TestCase> remainingTestCases = moduleData.getTestCases().subList(1, moduleData.getTestCases().size());
-                        System.out.println("模块" + sectionNumber + "需要为" + remainingTestCases.size() + "个剩余测试用例创建子章节和表格");
-                        
-                        // 如果insertAfterPara还是null，在第一个表格后创建一个空段落作为插入点
-                        if (insertAfterPara == null && existingTable != null) {
-                            System.out.println("在第一个表格后创建空段落作为插入点");
-                            // 找到表格在body中的位置
-                            org.apache.xmlbeans.XmlCursor existingTableCursor = existingTable.newCursor();
-                            existingTableCursor.toEndToken();
-                            existingTableCursor.toNextToken();
-                            
-                            // 找到表格后的段落位置，但只查找属于同一主章节的段落
-                            int insertPos = -1;
-                            for (int k = 0; k < body2.sizeOfPArray(); k++) {
-                                CTP checkPara7 = body2.getPArray(k);
-                                org.apache.xmlbeans.XmlCursor checkCursor7 = checkPara7.newCursor();
-                                if (checkCursor7.comparePosition(existingTableCursor) > 0) {
-                                    // 检查这个段落是否属于同一主章节
-                                    XWPFParagraph xwpfPara7 = new XWPFParagraph(checkPara7, document);
-                                    String paraText7 = xwpfPara7.getText();
-                                    
-                                    boolean belongsToSameSection = false;
-                                    if (paraText7 == null || paraText7.trim().isEmpty()) {
-                                        // 空段落，属于同一章节
-                                        belongsToSameSection = true;
-                                    } else if (paraText7.trim().matches("^\\d+\\.\\d+\\s+.*")) {
-                                        // 主章节标题，检查是否属于同一主章节
-                                        String[] parts = paraText7.trim().split("\\s+", 2);
-                                        if (parts.length > 0) {
-                                            String mainSectionNum = parts[0];
-                                            // 如果遇到其他主章节，停止查找
-                                            if (!mainSectionNum.equals(sectionNumber)) {
-                                                checkCursor7.close();
-                                                break;
-                                            }
-                                            belongsToSameSection = true;
-                                        }
-                                    } else if (paraText7.trim().matches("^\\d+\\.\\d+\\.\\d+\\s+.*")) {
-                                        // 子章节标题，检查是否属于同一主章节
-                                        String[] parts = paraText7.trim().split("\\s+", 2);
-                                        if (parts.length > 0) {
-                                            String subSectionNum = parts[0];
-                                            belongsToSameSection = subSectionNum.startsWith(sectionNumber + ".");
-                                        }
-                                    } else {
-                                        // 普通段落，属于同一章节
-                                        belongsToSameSection = true;
-                                    }
-                                    
-                                    if (belongsToSameSection) {
-                                        insertPos = k;
-                                        checkCursor7.close();
-                                        break;
-                                    } else {
-                                        // 遇到其他主章节，停止查找
-                                        checkCursor7.close();
-                                        break;
-                                    }
-                                }
-                                checkCursor7.close();
-                            }
-                            existingTableCursor.close();
-                            
-                            if (insertPos >= 0) {
-                                CTP newPara3 = body2.insertNewP(insertPos);
-                                insertAfterPara = new XWPFParagraph(newPara3, document);
-                                System.out.println("在第一个表格后创建空段落作为插入点（位置: " + insertPos + "）");
-                            } else {
-                                // 如果找不到，在第一个子章节后创建空段落
-                                if (firstSubSectionPara != null) {
-                                    int firstSubSectionIndex = -1;
-                                    for (int k = 0; k < body2.sizeOfPArray(); k++) {
-                                        if (body2.getPArray(k) == firstSubSectionPara.getCTP()) {
-                                            firstSubSectionIndex = k;
-                                            break;
-                                        }
-                                    }
-                                    if (firstSubSectionIndex >= 0) {
-                                        // 找到第一个子章节后的表格位置
-                                        CTTbl firstTable2 = findTableCttblAfterParagraph(body, firstSubSectionPara.getCTP());
-                                        if (firstTable2 != null) {
-                                            // 找到表格后的位置
-                                            org.apache.xmlbeans.XmlCursor firstTableCursor2 = firstTable2.newCursor();
-                                            firstTableCursor2.toEndToken();
-                                            firstTableCursor2.toNextToken();
-                                            
-                                            for (int k = firstSubSectionIndex + 1; k < body2.sizeOfPArray(); k++) {
-                                                CTP checkPara8 = body2.getPArray(k);
-                                                org.apache.xmlbeans.XmlCursor checkCursor8 = checkPara8.newCursor();
-                                                if (checkCursor8.comparePosition(firstTableCursor2) > 0) {
-                                                    CTP newPara3 = body2.insertNewP(k);
-                                                    insertAfterPara = new XWPFParagraph(newPara3, document);
-                                                    checkCursor8.close();
-                                                    firstTableCursor2.close();
-                                                    System.out.println("在第一个表格后创建空段落作为插入点（位置: " + k + "）");
-                                                    break;
-                                                }
-                                                checkCursor8.close();
-                                            }
-                                            firstTableCursor2.close();
-                                        }
-                                    }
-                                }
-                                
-                                if (insertAfterPara == null) {
-                                    CTP newPara3 = body2.addNewP();
-                                    insertAfterPara = new XWPFParagraph(newPara3, document);
-                                    System.out.println("在body末尾创建空段落作为插入点");
-                                }
-                            }
-                        }
-                        
-                        // 如果还是找不到，使用第一个子章节（作为最后的备选，但这样会导致顺序问题）
-                        if (insertAfterPara == null) {
-                            System.err.println("警告：找不到合适的插入点，使用第一个子章节，可能导致顺序问题");
-                            insertAfterPara = firstSubSectionPara != null ? firstSubSectionPara : sectionPara;
-                        }
-                        
-                        System.out.println("模块" + sectionNumber + "插入点: " + (insertAfterPara != null ? (insertAfterPara.getText() != null && !insertAfterPara.getText().trim().isEmpty() ? insertAfterPara.getText() : "空段落") : "null"));
-                        
-                        // 为剩余的测试用例创建子章节和表格（按顺序）
-                        for (int i = 0; i < remainingTestCases.size(); i++) {
-                            TestCase testCase = remainingTestCases.get(i);
-                            int sequenceNumber = i + 2; // 从2开始编号
-                            
-                            // 创建子章节标题段落
-                            String subSectionNumber = sectionNumber + "." + sequenceNumber;
-                            System.out.println("创建子章节: " + subSectionNumber + " " + testCase.getTestName() + "测试");
-                            
-                            XWPFParagraph subSectionPara = createSubSectionParagraph(
-                                document, insertAfterPara, subSectionNumber, testCase.getTestName());
-                            
-                            // 在子章节后查找并填充表格（优先使用已存在的表格，如果不存在则复制模板）
-                            System.out.println("为子章节" + subSectionNumber + "查找并填充表格");
-                            insertTestCaseTableAfterParagraph(document, subSectionPara.getCTP(), testCase, templateTable);
-                            
-                            // 创建完表格后，立即在表格后创建一个空段落作为下次的插入点
-                            // 这样可以确保下一个子章节插入在当前子章节的表格之后
-                            org.apache.xmlbeans.XmlCursor subSectionCursor = subSectionPara.getCTP().newCursor();
-                            subSectionCursor.toEndToken();
-                            
-                            // 找到子章节后的表格
-                            CTBody bodyAfterTable = document.getDocument().getBody();
-                            CTTbl tableAfterSub = findTableCttblAfterParagraph(bodyAfterTable, subSectionPara.getCTP());
-                            if (tableAfterSub != null) {
-                                // 在表格后创建空段落
-                                org.apache.xmlbeans.XmlCursor tableCursor = tableAfterSub.newCursor();
-                                tableCursor.toEndToken();
-                                tableCursor.toNextToken();
-                                
-                                tableCursor.beginElement(
-                                    new javax.xml.namespace.QName("http://schemas.openxmlformats.org/wordprocessingml/2006/main", "p", "w"));
-                                tableCursor.toParent();
-                                
-                                // 获取刚插入的CTP对象
-                                CTP newEmptyPara = null;
-                                if (tableCursor.getObject() instanceof CTP) {
-                                    newEmptyPara = (CTP) tableCursor.getObject();
-                                }
-                                
-                                tableCursor.close();
-                                
-                                if (newEmptyPara != null) {
-                                    insertAfterPara = new XWPFParagraph(newEmptyPara, document);
-                                    System.out.println("在子章节" + subSectionNumber + "的表格后创建空段落作为下次插入点");
-                                } else {
-                                    System.err.println("创建空段落失败");
-                                }
-                            } else {
-                                System.err.println("找不到子章节" + subSectionNumber + "后的表格");
-                            }
-                            
-                            subSectionCursor.close();
-                        }
-                        System.out.println("模块" + sectionNumber + "剩余" + remainingTestCases.size() + "个表格创建完成");
+                        // 更新插入点为当前子章节
+                        currentInsertPoint = subSectionPara;
                     }
-                } else {
-                    // 如果没有表格，在章节后插入内容（为所有测试用例创建子章节和表格）
-                    insertModuleContent(document, sectionPara, sectionNumber, moduleData, globalTemplateTable);
-                    System.out.println("模块" + sectionNumber + "处理完成（生成" + 
-                                     moduleData.getTestCaseCount() + "个表格）");
                 }
+                
+                System.out.println("模块" + sectionNumber + "处理完成（生成" + testCases.size() + "个表格）");
                 successCount++;
             }
             
@@ -537,6 +348,13 @@ public class WordProcessor {
 
             return successCount;
 
+        } catch (OLE2NotOfficeXmlFileException e) {
+            throw new Exception("不支持旧版Word格式(.doc文件)。请将文件转换为.docx格式后再使用。\n" +
+                    "转换方法：\n" +
+                    "1. 使用Microsoft Word打开.doc文件\n" +
+                    "2. 选择'文件' -> '另存为'\n" +
+                    "3. 在'文件类型'中选择'Word文档(*.docx)'\n" +
+                    "4. 保存后使用新的.docx文件", e);
         } catch (IOException e) {
             throw new Exception("处理Word文档失败: " + e.getMessage(), e);
         }
@@ -582,6 +400,7 @@ public class WordProcessor {
     
     /**
      * 扫描Word文档中已存在的子章节（如5.3.1、5.3.2等）
+     * 从目录读取子章节编号，然后在正文中查找对应段落
      *
      * @param document Word文档
      * @return 子章节信息列表
@@ -590,29 +409,96 @@ public class WordProcessor {
         List<SubSectionInfo> subSections = new java.util.ArrayList<>();
         List<XWPFParagraph> paragraphs = document.getParagraphs();
         
+        // 目录样式 ID
+        java.util.Set<String> tocStyles = new java.util.HashSet<>();
+        tocStyles.add("22");
+        tocStyles.add("25");
+        tocStyles.add("16");
+        
+        // 正文标题样式 ID: 2=Heading1, 3=Heading2, 4=Heading3, 5=Heading4
+        java.util.Set<String> headingStyles = new java.util.HashSet<>();
+        headingStyles.add("2");  // Heading 1
+        headingStyles.add("3");  // Heading 2
+        headingStyles.add("4");  // Heading 3 (子章节 X.X.X)
+        headingStyles.add("5");  // Heading 4
+        
+        // 存储目录中的子章节: 编号 -> 名称
+        java.util.Map<String, String> tocSubSections = new java.util.LinkedHashMap<>();
+        
+        // 子章节匹配模式：X.X.X 模块名称
+        Pattern subSectionPattern = Pattern.compile("^(\\d+\\.\\d+\\.\\d+)\\s+(.+)$");
+        
+        // 第一遍：从目录中读取子章节编号和名称
         for (XWPFParagraph para : paragraphs) {
             try {
                 String text = para.getText();
-                
                 if (text == null || text.trim().isEmpty()) {
                     continue;
                 }
 
-                // 匹配子章节格式：X.X.X 模块名称（如 "5.3.1 登录功能测试"）
-                Matcher matcher = SECTION_PATTERN.matcher(text.trim());
+                String styleName = para.getStyle();
+                boolean isToc = styleName != null && 
+                    (tocStyles.contains(styleName) || styleName.toLowerCase().startsWith("toc"));
+                
+                if (!isToc) {
+                    continue;
+                }
+
+                // 匹配子章节格式：X.X.X 模块名称
+                Matcher matcher = subSectionPattern.matcher(text.trim());
                 if (matcher.matches()) {
                     String sectionNumber = matcher.group(1);
-                    // 只添加子章节（X.X.X格式），不添加主章节（X.X格式）
-                    if (sectionNumber.matches("^\\d+\\.\\d+\\.\\d+$")) {
-                        subSections.add(new SubSectionInfo(sectionNumber, para));
+                    String sectionName = matcher.group(2).trim();
+                    // 去除页码
+                    int tabIndex = sectionName.indexOf('\t');
+                    if (tabIndex > 0) {
+                        sectionName = sectionName.substring(0, tabIndex).trim();
                     }
+                    tocSubSections.put(sectionNumber, sectionName);
                 }
-            } catch (org.apache.xmlbeans.impl.values.XmlValueDisconnectedException e) {
-                // 段落已被删除，跳过
-                continue;
             } catch (Exception e) {
-                // 其他异常，跳过
                 continue;
+            }
+        }
+        
+        // 第二遍：在正文中查找对应的段落
+        for (java.util.Map.Entry<String, String> entry : tocSubSections.entrySet()) {
+            String subNumber = entry.getKey();
+            String subName = entry.getValue();
+            
+            for (XWPFParagraph para : paragraphs) {
+                try {
+                    String text = para.getText();
+                    if (text == null || text.trim().isEmpty()) {
+                        continue;
+                    }
+                    
+                    String styleName = para.getStyle();
+                    
+                    // 跳过目录项
+                    boolean isToc = styleName != null && 
+                        (tocStyles.contains(styleName) || styleName.toLowerCase().startsWith("toc"));
+                    if (isToc) {
+                        continue;
+                    }
+                    
+                    // 只在标题样式中查找
+                    boolean isHeading = styleName != null && 
+                        (headingStyles.contains(styleName) || 
+                         styleName.toLowerCase().contains("heading") ||
+                         styleName.contains("标题") ||
+                         styleName.contains("程序标题"));
+                    
+                    String trimmed = text.trim();
+                    // 匹配带编号或仅名称
+                    if ((trimmed.startsWith(subNumber + " ") || trimmed.equals(subName)) && isHeading) {
+                        subSections.add(new SubSectionInfo(subNumber, para));
+                        System.out.println("找到正文中的子章节: " + subNumber + " -> " + trimmed);
+                        break;
+                    }
+                } catch (Exception e) {
+                    continue;
+                }
             }
         }
         
@@ -633,6 +519,53 @@ public class WordProcessor {
         run.setText(newText);
         run.setBold(true);
         run.setFontSize(12);
+    }
+    
+    /**
+     * 更新表格标题（Caption）
+     * 查找子章节后面的Caption样式段落并更新
+     */
+    private void updateTableCaption(XWPFDocument document, XWPFParagraph subSectionPara, 
+                                     String subSectionNumber, String testName) {
+        List<XWPFParagraph> paragraphs = document.getParagraphs();
+        
+        // 找到子章节在列表中的位置
+        int subSectionIndex = -1;
+        for (int i = 0; i < paragraphs.size(); i++) {
+            if (paragraphs.get(i).getCTP() == subSectionPara.getCTP()) {
+                subSectionIndex = i;
+                break;
+            }
+        }
+        
+        if (subSectionIndex == -1) {
+            return;
+        }
+        
+        // 查找子章节后的第一个Caption样式段落
+        for (int i = subSectionIndex + 1; i < paragraphs.size() && i < subSectionIndex + 5; i++) {
+            XWPFParagraph para = paragraphs.get(i);
+            String styleName = para.getStyle();
+            
+            // 检查是否是Caption样式 (style_id="11")
+            if (styleName != null && (styleName.equalsIgnoreCase("Caption") || 
+                styleName.equals("11") || styleName.contains("题注"))) {
+                // 更新Caption文本
+                String newCaption = "表" + subSectionNumber + " " + testName + "测试";
+                updateParagraphText(para, newCaption);
+                System.out.println("更新表格标题为: " + newCaption);
+                break;
+            }
+            
+            // 如果遇到表格或其他Heading，停止查找
+            String text = para.getText();
+            if (text != null && !text.trim().isEmpty()) {
+                if (styleName != null && (styleName.equals("3") || styleName.equals("4") || 
+                    styleName.toLowerCase().contains("heading"))) {
+                    break;
+                }
+            }
+        }
     }
 
     /**
@@ -665,10 +598,11 @@ public class WordProcessor {
     
     /**
      * 创建子章节标题段落
+     * 设置 Heading 3 样式以便后续识别
      *
      * @param document Word文档
      * @param afterPara 在哪个段落后插入
-     * @param moduleNumber 模块编号，如 "5.1"
+     * @param moduleNumber 模块编号，如 "5.2.2"
      * @param testName 测试名称，如 "登录功能"
      * @return 创建的子章节段落
      */
@@ -677,48 +611,34 @@ public class WordProcessor {
         CTBody body = document.getDocument().getBody();
         CTP afterCTP = afterPara.getCTP();
         
-        // 使用XmlCursor在段落后直接插入新段落元素
-        org.apache.xmlbeans.XmlCursor paraCursor = afterCTP.newCursor();
-        paraCursor.toEndToken();
-        paraCursor.toNextToken();
-        
-        // 在cursor位置插入新的段落元素
-        paraCursor.beginElement(
-            new javax.xml.namespace.QName("http://schemas.openxmlformats.org/wordprocessingml/2006/main", "p", "w"));
-        paraCursor.toParent();
-        
-        // 获取刚插入的CTP对象
-        CTP ctp = null;
-        if (paraCursor.getObject() instanceof CTP) {
-            ctp = (CTP) paraCursor.getObject();
+        // 找到afterPara在body中的位置
+        int afterIndex = -1;
+        for (int i = 0; i < body.sizeOfPArray(); i++) {
+            if (body.getPArray(i) == afterCTP) {
+                afterIndex = i;
+                break;
+            }
         }
         
-        paraCursor.close();
-        
-        if (ctp == null) {
-            System.err.println("创建子章节段落失败");
-            // 降级处理：使用老方法
-            int pIndex = -1;
-            for (int i = 0; i < body.sizeOfPArray(); i++) {
-                if (body.getPArray(i) == afterCTP) {
-                    pIndex = i;
-                    break;
-                }
-            }
-            if (pIndex == -1) {
-                pIndex = body.sizeOfPArray();
-            }
-            ctp = body.insertNewP(pIndex + 1);
+        if (afterIndex == -1) {
+            System.err.println("找不到插入点段落，使用末尾插入");
+            afterIndex = body.sizeOfPArray() - 1;
         }
         
+        // 在afterIndex+1位置插入新段落
+        CTP ctp = body.insertNewP(afterIndex + 1);
         XWPFParagraph para = new XWPFParagraph(ctp, document);
 
-        // 设置标题样式：小四、加粗
+        // 不使用Heading样式（避免自动编号导致双编号问题）
+        // 直接设置格式为加粗、小四号字体
+        
+        // 设置标题内容：编号 + 名称
         String subTitle = moduleNumber + " " + testName + "测试";
         XWPFRun run = para.createRun();
         run.setText(subTitle);
         run.setBold(true);
         run.setFontSize(12); // 小四号字体
+        run.setFontFamily("宋体"); // 设置字体
 
         // 设置段落格式
         para.setAlignment(ParagraphAlignment.LEFT);
@@ -726,11 +646,14 @@ public class WordProcessor {
         CTSpacing spacing = ppr.isSetSpacing() ? ppr.getSpacing() : ppr.addNewSpacing();
         spacing.setAfter(BigInteger.valueOf(120)); // 段后间距
         
+        System.out.println("在位置 " + (afterIndex + 1) + " 插入子章节: " + subTitle);
+        
         return para;
     }
 
     /**
      * 扫描Word文档中的所有章节编号
+     * 从目录（TOC）中读取章节编号（因为正文中的章节标题可能没有编号）
      *
      * @param document Word文档
      * @return 章节编号列表，如 ["4.3", "5.3", "6.2"]
@@ -739,6 +662,8 @@ public class WordProcessor {
         List<String> sectionNumbers = new java.util.ArrayList<>();
         List<XWPFParagraph> paragraphs = document.getParagraphs();
         
+        // 只从目录项（样式 ID 22, 25, 16 等）中读取章节编号
+        // 同时建立章节编号到章节名称的映射
         for (XWPFParagraph para : paragraphs) {
             try {
                 String text = para.getText();
@@ -747,22 +672,33 @@ public class WordProcessor {
                     continue;
                 }
 
+                String styleName = para.getStyle();
+                
+                // 目录样式 ID: 22=toc1, 25=toc2, 16=toc3
+                boolean isToc = styleName != null && 
+                    (styleName.equals("22") || styleName.equals("25") || styleName.equals("16") ||
+                     styleName.toLowerCase().startsWith("toc"));
+                
+                if (!isToc) {
+                    continue;
+                }
+                
+                String trimmed = text.trim();
+
                 // 匹配章节标题格式：X.X 模块名称
-                Matcher matcher = SECTION_PATTERN.matcher(text.trim());
+                Matcher matcher = SECTION_PATTERN.matcher(trimmed);
                 if (matcher.matches()) {
                     String sectionNumber = matcher.group(1);
                     // 只添加主章节（X.X格式），不添加子章节（X.X.X格式）
-                    if (sectionNumber.matches("^\\d+\\.\\d+$") && !sectionNumber.matches("^\\d+\\.\\d+\\..+$")) {
+                    if (sectionNumber.matches("^\\d+\\.\\d+$")) {
                         if (!sectionNumbers.contains(sectionNumber)) {
                             sectionNumbers.add(sectionNumber);
                         }
                     }
                 }
             } catch (org.apache.xmlbeans.impl.values.XmlValueDisconnectedException e) {
-                // 段落已被删除，跳过
                 continue;
             } catch (Exception e) {
-                // 其他异常，跳过
                 continue;
             }
         }
@@ -772,6 +708,7 @@ public class WordProcessor {
 
     /**
      * 查找章节标题段落
+     * 策略：1. 从目录(TOC)获取章节名称 2. 在正文中通过名称和Heading样式匹配
      *
      * @param document     Word文档
      * @param moduleNumber 模块编号，如"5.3"或"4.3"
@@ -779,42 +716,97 @@ public class WordProcessor {
      */
     private XWPFParagraph findSectionParagraph(XWPFDocument document, String moduleNumber) {
         List<XWPFParagraph> paragraphs = document.getParagraphs();
+        String sectionNameFromToc = null;  // 从目录中提取的章节名称
         
+        // 目录样式 ID: 22=toc1, 25=toc2, 16=toc3
+        java.util.Set<String> tocStyles = new java.util.HashSet<>();
+        tocStyles.add("22");
+        tocStyles.add("25");
+        tocStyles.add("16");
+        
+        // 正文标题样式 ID: 2=Heading1, 3=Heading2, 4=Heading3, 5=Heading4
+        java.util.Set<String> headingStyles = new java.util.HashSet<>();
+        headingStyles.add("2");  // Heading 1
+        headingStyles.add("3");  // Heading 2 (主章节 X.X)
+        headingStyles.add("4");  // Heading 3 (子章节 X.X.X)
+        headingStyles.add("5");  // Heading 4
+        
+        // 第一遍：从目录中提取章节名称
         for (XWPFParagraph para : paragraphs) {
             try {
                 String text = para.getText();
-                
                 if (text == null || text.trim().isEmpty()) {
                     continue;
                 }
 
-                // 匹配章节标题格式：支持多种格式
-                // 1. "5.3 功能测试" 或 "4.3 功能测试"
-                // 2. "5.3.1 登录功能测试" (子章节，但也会匹配)
-                // 3. 去掉所有空格后匹配
+                String styleName = para.getStyle();
+                boolean isToc = styleName != null && 
+                    (tocStyles.contains(styleName) || styleName.toLowerCase().startsWith("toc"));
+                
+                if (isToc) {
+                    String trimmedText = text.trim();
+                    Matcher matcher = SECTION_PATTERN.matcher(trimmedText);
+                    if (matcher.matches()) {
+                        String foundModuleNumber = matcher.group(1);
+                        if (moduleNumber.equals(foundModuleNumber)) {
+                            sectionNameFromToc = matcher.group(2).trim();
+                            // 去除页码（通常以\t分隔）
+                            int tabIndex = sectionNameFromToc.indexOf('\t');
+                            if (tabIndex > 0) {
+                                sectionNameFromToc = sectionNameFromToc.substring(0, tabIndex).trim();
+                            }
+                            System.out.println("从目录提取章节名称: " + moduleNumber + " -> " + sectionNameFromToc);
+                            break;
+                        }
+                    }
+                }
+            } catch (Exception e) {
+                continue;
+            }
+        }
+        
+        // 第二遍：在正文中查找匹配的段落（只在Heading样式中查找）
+        for (XWPFParagraph para : paragraphs) {
+            try {
+                String text = para.getText();
+                if (text == null || text.trim().isEmpty()) {
+                    continue;
+                }
+                
+                String styleName = para.getStyle();
+                
+                // 跳过目录项
+                if (styleName != null && 
+                    (tocStyles.contains(styleName) || styleName.toLowerCase().startsWith("toc"))) {
+                    continue;
+                }
+                
+                // 只在正文标题样式中查找
+                boolean isHeading = styleName != null && 
+                    (headingStyles.contains(styleName) || 
+                     styleName.toLowerCase().contains("heading") || 
+                     styleName.contains("标题"));
+                
                 String trimmedText = text.trim();
                 
-                // 先尝试标准格式：X.X 模块名称
+                // 方法1：尝试通过编号匹配（如果正文有编号）
                 Matcher matcher = SECTION_PATTERN.matcher(trimmedText);
                 if (matcher.matches()) {
                     String foundModuleNumber = matcher.group(1);
                     if (moduleNumber.equals(foundModuleNumber)) {
+                        System.out.println("在正文中找到章节(通过编号): " + trimmedText + " [" + styleName + "]");
                         return para;
                     }
                 }
                 
-                // 如果标准格式不匹配，尝试更宽松的匹配
-                // 检查是否以模块编号开头（允许后面有任意字符）
-                if (trimmedText.startsWith(moduleNumber + " ") || 
-                    trimmedText.startsWith(moduleNumber + ".") ||
-                    trimmedText.equals(moduleNumber)) {
+                // 方法2：通过章节名称 + Heading样式匹配
+                if (sectionNameFromToc != null && trimmedText.equals(sectionNameFromToc) && isHeading) {
+                    System.out.println("在正文中找到章节(通过名称+样式): " + trimmedText + " [" + styleName + "]");
                     return para;
                 }
             } catch (org.apache.xmlbeans.impl.values.XmlValueDisconnectedException e) {
-                // 段落已被删除，跳过
                 continue;
             } catch (Exception e) {
-                // 其他异常，跳过
                 continue;
             }
         }
@@ -1372,6 +1364,195 @@ public class WordProcessor {
     }
     
     /**
+     * 找到章节的最后一个子章节，用于确定插入点
+     * 样式ID对应：2=Heading1, 3=Heading2, 4=Heading3
+     * X.X 章节用 Heading 2 (样式ID=3)，X.X.X 子章节用 Heading 3 (样式ID=4)
+     */
+    private XWPFParagraph findLastElementInSection(XWPFDocument document, XWPFParagraph sectionPara, String sectionNumber) {
+        List<XWPFParagraph> paragraphs = document.getParagraphs();
+        
+        // 目录样式 ID
+        java.util.Set<String> tocStyles = new java.util.HashSet<>();
+        tocStyles.add("22");
+        tocStyles.add("25");
+        tocStyles.add("16");
+        
+        // 找到章节段落在列表中的位置
+        int sectionIndex = -1;
+        for (int i = 0; i < paragraphs.size(); i++) {
+            if (paragraphs.get(i).getCTP() == sectionPara.getCTP()) {
+                sectionIndex = i;
+                break;
+            }
+        }
+        
+        if (sectionIndex == -1) {
+            return sectionPara;
+        }
+        
+        // 从章节段落后开始查找，找到最后一个属于该章节的子章节
+        XWPFParagraph lastSubSection = null;
+        
+        for (int i = sectionIndex + 1; i < paragraphs.size(); i++) {
+            XWPFParagraph para = paragraphs.get(i);
+            String text = para.getText();
+            String styleName = para.getStyle();
+            
+            if (text == null || text.trim().isEmpty()) {
+                continue;
+            }
+            
+            // 跳过目录项
+            boolean isToc = styleName != null && 
+                (tocStyles.contains(styleName) || styleName.toLowerCase().startsWith("toc"));
+            if (isToc) {
+                continue;
+            }
+            
+            // 通过样式识别章节边界
+            if (styleName != null) {
+                // 样式 "2" = Heading 1 (一级标题) -> 遇到一级标题，停止
+                // 样式 "3" = Heading 2 (二级标题/主章节) -> 遇到下一个主章节，停止
+                if (styleName.equals("2") || styleName.equals("3") || 
+                    styleName.toLowerCase().contains("heading 1") ||
+                    styleName.toLowerCase().contains("heading 2") ||
+                    styleName.contains("标题 1") || styleName.contains("标题 2")) {
+                    break;
+                }
+                // 样式 "4" = Heading 3 (三级标题/子章节) -> 记录为 lastSubSection
+                // 也包括 "程序标题 3" 等变体
+                if (styleName.equals("4") || styleName.equals("5") ||
+                    styleName.toLowerCase().contains("heading 3") || 
+                    styleName.toLowerCase().contains("heading 4") ||
+                    styleName.contains("标题 3") || styleName.contains("程序标题")) {
+                    lastSubSection = para;
+                    continue;
+                }
+            }
+        }
+        
+        // 如果找到了子章节，返回最后一个子章节；否则返回主章节
+        return lastSubSection != null ? lastSubSection : sectionPara;
+    }
+    
+    /**
+     * 找到章节下所有已存在的子章节段落
+     * 用于复用模板中的子章节（如 XX测试）
+     */
+    private List<XWPFParagraph> findExistingSubSectionsInSection(XWPFDocument document, 
+                                                                   XWPFParagraph sectionPara, 
+                                                                   String sectionNumber) {
+        List<XWPFParagraph> subSections = new java.util.ArrayList<>();
+        List<XWPFParagraph> paragraphs = document.getParagraphs();
+        
+        // 目录样式 ID
+        java.util.Set<String> tocStyles = new java.util.HashSet<>();
+        tocStyles.add("22");
+        tocStyles.add("25");
+        tocStyles.add("16");
+        
+        // 找到章节段落在列表中的位置
+        int sectionIndex = -1;
+        for (int i = 0; i < paragraphs.size(); i++) {
+            if (paragraphs.get(i).getCTP() == sectionPara.getCTP()) {
+                sectionIndex = i;
+                break;
+            }
+        }
+        
+        if (sectionIndex == -1) {
+            return subSections;
+        }
+        
+        // 从章节段落后开始查找子章节
+        for (int i = sectionIndex + 1; i < paragraphs.size(); i++) {
+            XWPFParagraph para = paragraphs.get(i);
+            String text = para.getText();
+            String styleName = para.getStyle();
+            
+            if (text == null || text.trim().isEmpty()) {
+                continue;
+            }
+            
+            // 跳过目录项
+            boolean isToc = styleName != null && 
+                (tocStyles.contains(styleName) || styleName.toLowerCase().startsWith("toc"));
+            if (isToc) {
+                continue;
+            }
+            
+            // 检查是否是主章节（Heading 2），如果是则停止
+            if (styleName != null) {
+                if (styleName.equals("2") || styleName.equals("3") || 
+                    styleName.toLowerCase().contains("heading 1") ||
+                    styleName.toLowerCase().contains("heading 2") ||
+                    styleName.contains("标题 1") || styleName.contains("标题 2")) {
+                    break;
+                }
+                // 子章节样式（Heading 3/4）
+                if (styleName.equals("4") || styleName.equals("5") ||
+                    styleName.toLowerCase().contains("heading 3") || 
+                    styleName.toLowerCase().contains("heading 4") ||
+                    styleName.contains("标题 3") || styleName.contains("程序标题")) {
+                    subSections.add(para);
+                }
+            }
+        }
+        
+        return subSections;
+    }
+    
+    /**
+     * 找到表格后的插入点（用于插入下一个子章节）
+     */
+    private XWPFParagraph findInsertPointAfterTable(XWPFDocument document, XWPFParagraph beforeTablePara) {
+        CTBody body = document.getDocument().getBody();
+        CTTbl table = findTableCttblAfterParagraph(body, beforeTablePara.getCTP());
+        
+        if (table == null) {
+            return beforeTablePara;
+        }
+        
+        // 在表格后创建空段落作为插入点
+        org.apache.xmlbeans.XmlCursor tableCursor = table.newCursor();
+        tableCursor.toEndToken();
+        tableCursor.toNextToken();
+        
+        // 找到表格后的段落位置
+        int insertPos = -1;
+        for (int i = 0; i < body.sizeOfPArray(); i++) {
+            CTP checkPara = body.getPArray(i);
+            org.apache.xmlbeans.XmlCursor checkCursor = checkPara.newCursor();
+            if (checkCursor.comparePosition(tableCursor) > 0) {
+                insertPos = i;
+                checkCursor.close();
+                break;
+            }
+            checkCursor.close();
+        }
+        tableCursor.close();
+        
+        if (insertPos >= 0) {
+            // 检查该位置是否已有段落，如果有空段落则使用，否则创建新的
+            CTP existingPara = body.getPArray(insertPos);
+            XWPFParagraph existingXwpfPara = new XWPFParagraph(existingPara, document);
+            String paraText = existingXwpfPara.getText();
+            if (paraText == null || paraText.trim().isEmpty()) {
+                // 使用现有的空段落
+                return existingXwpfPara;
+            } else {
+                // 在当前位置插入新段落
+                CTP newPara = body.insertNewP(insertPos);
+                return new XWPFParagraph(newPara, document);
+            }
+        } else {
+            // 如果找不到位置，在body末尾添加
+            CTP newPara = body.addNewP();
+            return new XWPFParagraph(newPara, document);
+        }
+    }
+    
+    /**
      * 填充表格数据（识别Word表格格式并填充）
      * 支持两种格式：
      * 1. 2列格式：左列是标签，右列是数据（从Word表格读取标签）
@@ -1833,3 +2014,4 @@ public class WordProcessor {
         }
     }
 }
+

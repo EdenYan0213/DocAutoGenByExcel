@@ -1,8 +1,24 @@
-# Excel数据驱动Word多模块动态表格生成工具
+# Excel数据驱动Word文档自动生成工具
 
 ## 项目简介
 
-本工具可以根据Excel中的测试用例数据，自动在Word测试报告的指定章节生成带动态编号的测试表格，无需修改原始Word模板。
+本工具是一个基于GJB438C标准的软件文档自动生成工具，主要功能包括：
+
+1. **Excel数据驱动Word文档生成**：根据Excel中的测试用例数据，自动在Word测试报告的指定章节生成带动态编号的测试表格
+2. **需求分解**：支持将高层需求分解为多个子需求，形成需求树结构
+3. **需求追溯**：建立需求与测试用例之间的追溯关系，支持追溯矩阵生成和验证
+4. **需求树Word文档生成**：将需求树以树状结构输出到Word文档
+
+## 核心功能
+
+- ✅ **零侵入性**：完全适配原始Word模板，无需修改模板结构
+- ✅ **精准定位**：按Word章节标题自动定位填充位置
+- ✅ **动态编号**：模块内编号自动生成（如5.3.1、5.3.2）
+- ✅ **批量处理**：支持一次处理多个模块数据
+- ✅ **格式保留**：完全保留原始模板的格式
+- ✅ **需求分解**：支持多级需求分解，自动生成需求编号
+- ✅ **需求追溯**：支持需求与测试用例的追溯关系管理
+- ✅ **Word文档生成**：支持生成需求树Word文档
 
 ## 功能特性
 
@@ -68,6 +84,8 @@ Word模板中需要包含章节标题，格式为：`X.X 模块名称`
 ```bash
 java -jar DocAutoGenByExcel-0.0.1-SNAPSHOT.jar -excel "D:\data.xlsx" -word "D:\template.docx" -out "D:\output"
 ```
+java -jar target/DocAutoGenByExcel-0.0.1-SNAPSHOT.jar -excel "test_data.xlsx" -word "test_template.docx" -out "output"
+java -jar target/DocAutoGenByExcel-0.0.1-SNAPSHOT.jar -excel "test_data.xlsx" -word "1-XX测试大纲（公开）_副本.docx" -out "output"
 
 参数说明：
 - `-excel`: Excel文件路径（必填）
@@ -162,41 +180,87 @@ java -jar DocAutoGenByExcel-0.0.1-SNAPSHOT.jar
 
 ```
 DocAutoGenByExcel/
+├── README.md                          # 项目主说明文档
+├── REQUIREMENT_TRACEABILITY_GUIDE.md  # 需求追溯功能使用指南
+├── REQUIREMENT_TREE_WORD_GUIDE.md    # 需求树Word生成指南
+├── example_input_output.md            # 输入输出示例
+├── TEST_README.md                     # 测试说明文档
+├── pom.xml                            # Maven配置文件
+├── test_template.docx                 # Word模板示例
+├── test_data.xlsx                     # 测试数据示例
 ├── src/main/java/pub/developers/docautogenbyexcel/
 │   ├── ExcelToWordTool.java          # 主程序入口
 │   ├── model/                        # 数据模型
 │   │   ├── TestCase.java            # 测试用例模型
-│   │   └── ModuleData.java          # 模块数据模型
+│   │   ├── ModuleData.java          # 模块数据模型
+│   │   ├── Requirement.java         # 需求模型
+│   │   └── Traceability.java        # 追溯关系模型
 │   ├── reader/                       # Excel读取模块
-│   │   └── ExcelReader.java
+│   │   ├── ExcelReader.java         # 测试用例Excel读取器
+│   │   └── RequirementExcelReader.java # 需求Excel读取器
 │   ├── processor/                    # Word处理模块
 │   │   └── WordProcessor.java
+│   ├── manager/                      # 管理器模块
+│   │   ├── RequirementManager.java  # 需求管理器
+│   │   └── TraceabilityManager.java # 追溯管理器
+│   ├── generator/                    # 文档生成器模块
+│   │   └── RequirementTreeWordGenerator.java # 需求树Word生成器
 │   ├── config/                       # 配置模块
 │   │   └── ConfigLoader.java
-│   └── util/                         # 工具类
-│       └── FileUtil.java
+│   ├── util/                         # 工具类
+│   │   ├── FileUtil.java
+│   │   └── TestDataGenerator.java
+│   └── example/                      # 示例代码
+│       ├── QuickStartExample.java
+│       ├── RequirementTraceabilityExample.java
+│       └── RequirementTreeWordExample.java
+├── src/test/java/                     # 测试代码
+│   └── pub/developers/docautogenbyexcel/
+│       └── RequirementTraceabilityTest.java # 功能测试
 └── src/main/resources/
-    └── config.properties.example    # 配置文件示例
+    ├── application.properties
+    └── config.properties.example
 ```
 
 ## 技术栈
 
-- **Java**: JDK 8+
+- **Java**: JDK 17+
 - **Apache POI**: 5.2.5（Excel和Word处理）
 - **Apache Commons CLI**: 1.5.0（命令行参数解析）
-- **Spring Boot**: 4.0.0（框架支持，可选）
+- **Spring Boot**: 4.0.0（框架支持）
+- **JUnit 5**: 测试框架
+
+## 功能模块
+
+### 1. Excel到Word文档生成
+- 从Excel读取测试用例数据
+- 自动填充Word模板表格
+- 支持多模块批量处理
+
+### 2. 需求分解
+- 支持手动和自动需求分解
+- 自动生成需求编号
+- 支持多级需求分解
+
+### 3. 需求追溯
+- 建立需求与测试用例的追溯关系
+- 生成追溯矩阵
+- 追溯关系验证和覆盖率计算
+
+### 4. 需求树Word文档生成
+- 生成树状结构的需求树文档
+- 支持显示追溯信息
+- 自动生成统计信息
+
+## 相关文档
+
+- **需求追溯功能指南**：`REQUIREMENT_TRACEABILITY_GUIDE.md`
+- **需求树Word生成指南**：`REQUIREMENT_TREE_WORD_GUIDE.md`
+- **输入输出示例**：`example_input_output.md`
+- **测试说明**：`TEST_README.md`
 
 ## 性能指标
 
 - 数据处理能力：支持单次处理100条以内测试用例
 - 处理时间：100条数据处理时间≤10秒
 - 内存占用：运行时内存占用≤512MB
-
-## 许可证
-
-本项目采用 Apache License 2.0 许可证。
-
-## 联系方式
-
-如有问题或建议，请联系开发团队。
-

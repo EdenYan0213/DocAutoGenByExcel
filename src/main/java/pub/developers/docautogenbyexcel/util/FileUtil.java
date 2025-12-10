@@ -27,12 +27,27 @@ public class FileUtil {
         SimpleDateFormat sdf = new SimpleDateFormat("yyyyMMddHHmm");
         String timestamp = sdf.format(new Date());
         
-        // 确保输出目录以/结尾
-        if (!outputDir.endsWith("/") && !outputDir.endsWith("\\")) {
-            outputDir += File.separator;
+        // 处理输出目录路径
+        File outputDirFile = new File(outputDir);
+        // 如果是相对路径，转换为绝对路径
+        if (!outputDirFile.isAbsolute()) {
+            outputDirFile = new File(System.getProperty("user.dir"), outputDir);
         }
         
-        return outputDir + templateName + "_" + timestamp + ".docx";
+        // 确保输出目录存在
+        if (!outputDirFile.exists()) {
+            outputDirFile.mkdirs();
+        }
+        
+        // 构建输出文件路径
+        File outputFile = new File(outputDirFile, templateName + "_" + timestamp + ".docx");
+        
+        // 返回绝对路径，确保路径正确
+        try {
+            return outputFile.getCanonicalPath();
+        } catch (Exception e) {
+            return outputFile.getAbsolutePath();
+        }
     }
     
     /**
