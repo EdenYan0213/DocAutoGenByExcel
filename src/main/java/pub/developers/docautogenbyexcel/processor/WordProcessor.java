@@ -292,6 +292,19 @@ public class WordProcessor {
                     document, sectionPara, sectionNumber);
                 System.out.println("模块" + sectionNumber + "下已有" + existingSubSectionParas.size() + "个子章节");
                 
+                // 找到下一个主章节的位置作为边界（不在其后面插入）
+                XWPFParagraph nextSectionPara = findNextMainSection(document, sectionPara, sectionNumber);
+                int sectionBoundaryIndex = -1;
+                if (nextSectionPara != null) {
+                    for (int idx = 0; idx < body.sizeOfPArray(); idx++) {
+                        if (body.getPArray(idx) == nextSectionPara.getCTP()) {
+                            sectionBoundaryIndex = idx;
+                            break;
+                        }
+                    }
+                    System.out.println("模块" + sectionNumber + "的边界（下一个主章节）位置: " + sectionBoundaryIndex + " (" + nextSectionPara.getText() + ")");
+                }
+                
                 // 从第一个已存在的子章节提取格式（只提取一次）
                 if (templateSubSectionFormat == null && !existingSubSectionParas.isEmpty()) {
                     XWPFParagraph firstSubSection = existingSubSectionParas.get(0);
@@ -339,8 +352,31 @@ public class WordProcessor {
                         // 没有更多已存在的子章节，创建新的
                         System.out.println("创建子章节: " + subSectionNumber + " " + testCase.getTestName() + "测试");
                         System.out.println("当前插入点: " + (currentInsertPoint != null ? currentInsertPoint.getText() : "null"));
-                        XWPFParagraph subSectionPara = createSubSectionParagraph(
-                            document, currentInsertPoint, subSectionNumber, testCase.getTestName());
+                        
+                        // 检查当前插入点是否超过了章节边界
+                        XWPFParagraph actualInsertPoint = currentInsertPoint;
+                        if (sectionBoundaryIndex > 0 && currentInsertPoint != null) {
+                            int currentIndex = -1;
+                            for (int idx = 0; idx < body.sizeOfPArray(); idx++) {
+                                if (body.getPArray(idx) == currentInsertPoint.getCTP()) {
+                                    currentIndex = idx;
+                                    break;
+                                }
+                            }
+                            if (currentIndex >= sectionBoundaryIndex) {
+                                // 当前插入点已经超过边界，使用边界前一个位置
+                                System.out.println("警告: 插入点(" + currentIndex + ")超过边界(" + sectionBoundaryIndex + ")，调整到边界前");
+                                // 在边界之前插入，使用下一个主章节的前一个段落
+                                if (sectionBoundaryIndex > 0) {
+                                    CTP prevPara = body.getPArray(sectionBoundaryIndex - 1);
+                                    actualInsertPoint = new XWPFParagraph(prevPara, document);
+                                }
+                            }
+                        }
+                        
+                        XWPFParagraph subSectionPara = createSubSectionParagraphBeforeBoundary(
+                            document, actualInsertPoint, subSectionNumber, testCase.getTestName(), 
+                            sectionBoundaryIndex);
                         
                         // 创建表格标题（Caption）
                         XWPFParagraph captionPara = createTableCaption(document, subSectionPara, 
@@ -384,8 +420,16 @@ public class WordProcessor {
                             insertNewTableAfterParagraph(document, subSectionPara.getCTP(), testCase);
                         }
                         
-                        // 更新插入点为当前子章节
-                        currentInsertPoint = subSectionPara;
+                        // 更新插入点为表格后面（确保下一个子章节在表格后面创建）
+                        currentInsertPoint = findInsertPointAfterTable(document, subSectionPara);
+                        System.out.println("更新插入点到表格后面: " + (currentInsertPoint != null ? currentInsertPoint.getText() : "null"));
+                        
+                        // 每次插入新内容后，边界位置应该相应增加
+                        // （子章节标题 + Caption + 表格 = 大约3-4个元素）
+                        if (sectionBoundaryIndex > 0) {
+                            sectionBoundaryIndex += 4;  // 预估每个子章节增加4个元素
+                            System.out.println("更新边界位置到: " + sectionBoundaryIndex);
+                        }
                     }
                 }
                 
@@ -1034,6 +1078,88 @@ public class WordProcessor {
         spacing.setAfter(BigInteger.valueOf(120)); // 段后间距
         
         System.out.println("在位置 " + (afterIndex + 1) + " 插入子章节: " + subTitle);
+        
+        return para;
+    }
+    
+    /**
+     * 创建子章节标题段落（带边界检查）
+     * 确保插入位置不超过指定的边界
+     */
+    private XWPFParagraph createSubSectionParagraphBeforeBoundary(XWPFDocument document, XWPFParagraph afterPara, 
+                                                     String moduleNumber, String testName, int boundaryIndex) {
+        CTBody body = document.getDocument().getBody();
+        CTP afterCTP = afterPara.getCTP();
+        
+        // 找到afterPara在body中的位置
+        int afterIndex = -1;
+        for (int i = 0; i < body.sizeOfPArray(); i++) {
+            if (body.getPArray(i) == afterCTP) {
+                afterIndex = i;
+                break;
+            }
+        }
+        
+        if (afterIndex == -1) {
+            System.err.println("找不到插入点段落，使用末尾插入");
+            afterIndex = body.sizeOfPArray() - 1;
+        }
+        
+        // 计算实际插入位置
+        int insertIndex = afterIndex + 1;
+        
+        // 如果有边界限制，确保不超过边界
+        if (boundaryIndex > 0 && insertIndex >= boundaryIndex) {
+            insertIndex = boundaryIndex;
+            System.out.println("调整插入位置到边界: " + insertIndex);
+        }
+        
+        // 在insertIndex位置插入新段落（子章节标题）
+        CTP ctp = body.insertNewP(insertIndex);
+        XWPFParagraph para = new XWPFParagraph(ctp, document);
+
+        // 使用模板格式或默认格式
+        SubSectionFormat subFmt = templateSubSectionFormat != null ? templateSubSectionFormat : new SubSectionFormat();
+        
+        // 设置样式
+        try {
+            para.setStyle(subFmt.styleId);
+        } catch (Exception e) {
+            // 忽略样式设置失败
+        }
+        
+        // 关键：显式设置 numId=0 来禁用从样式继承的编号
+        CTPPr ppr = ctp.isSetPPr() ? ctp.getPPr() : ctp.addNewPPr();
+        CTNumPr numPr = ppr.isSetNumPr() ? ppr.getNumPr() : ppr.addNewNumPr();
+        CTDecimalNumber numId = numPr.isSetNumId() ? numPr.getNumId() : numPr.addNewNumId();
+        numId.setVal(BigInteger.ZERO);
+        
+        // 设置标题内容（使用模板格式）
+        String subTitle = moduleNumber + " " + testName + "测试";
+        // 编号部分
+        XWPFRun numRun = para.createRun();
+        numRun.setText(moduleNumber + " ");
+        numRun.setFontFamily(subFmt.numberFormat.fontFamily);
+        numRun.setFontSize(subFmt.numberFormat.fontSize);
+        if (subFmt.numberFormat.bold != null) {
+            numRun.setBold(subFmt.numberFormat.bold);
+        }
+        
+        // 内容部分
+        XWPFRun contentRun = para.createRun();
+        contentRun.setText(testName + "测试");
+        contentRun.setFontFamily(subFmt.contentFormat.fontFamily);
+        contentRun.setFontSize(subFmt.contentFormat.fontSize);
+        if (subFmt.contentFormat.bold != null) {
+            contentRun.setBold(subFmt.contentFormat.bold);
+        }
+
+        // 设置段落格式
+        para.setAlignment(ParagraphAlignment.LEFT);
+        CTSpacing spacing = ppr.isSetSpacing() ? ppr.getSpacing() : ppr.addNewSpacing();
+        spacing.setAfter(BigInteger.valueOf(120));
+        
+        System.out.println("在位置 " + insertIndex + " 插入子章节: " + subTitle);
         
         return para;
     }
@@ -1748,6 +1874,55 @@ public class WordProcessor {
         }
         
         return null;
+    }
+    
+    /**
+     * 找到下一个主章节（用于确定当前章节的边界）
+     * 例如：当前章节是 5.5，则找到 5.6 或 6.1 等
+     */
+    private XWPFParagraph findNextMainSection(XWPFDocument document, XWPFParagraph currentSectionPara, String currentSectionNumber) {
+        List<XWPFParagraph> paragraphs = document.getParagraphs();
+        
+        // 目录样式 ID
+        java.util.Set<String> tocStyles = new java.util.HashSet<>();
+        tocStyles.add("22");
+        tocStyles.add("25");
+        tocStyles.add("16");
+        
+        boolean foundCurrent = false;
+        
+        for (XWPFParagraph para : paragraphs) {
+            // 找到当前章节后开始查找
+            if (para.getCTP() == currentSectionPara.getCTP()) {
+                foundCurrent = true;
+                continue;
+            }
+            
+            if (!foundCurrent) continue;
+            
+            String text = para.getText();
+            if (text == null || text.trim().isEmpty()) continue;
+            
+            String styleId = para.getStyle();
+            
+            // 跳过目录项
+            if (styleId != null && (tocStyles.contains(styleId) || 
+                styleId.toLowerCase().startsWith("toc"))) {
+                continue;
+            }
+            
+            // 检查是否是 Heading 2（主章节样式）
+            boolean isHeading2 = styleId != null && 
+                (styleId.equals("3") || styleId.toLowerCase().contains("heading 2"));
+            
+            if (isHeading2) {
+                // 这是下一个主章节
+                System.out.println("找到下一个主章节: " + text.trim());
+                return para;
+            }
+        }
+        
+        return null; // 没有找到下一个主章节
     }
     
     /**
