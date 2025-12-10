@@ -25,6 +25,55 @@ public class WordProcessor {
     private static final Pattern SECTION_PATTERN = Pattern.compile("^(\\d+\\.\\d+)\\s+(.+)$");
     // 占位符匹配模式：X.x 表示该章节下有多个子章节
     private static final Pattern PLACEHOLDER_PATTERN = Pattern.compile("^(\\d+)\\.x\\s*(.+)?$", Pattern.CASE_INSENSITIVE);
+    
+    /**
+     * 内部类：保存Run的格式信息
+     */
+    private static class RunFormat {
+        String fontFamily;
+        Integer fontSize;
+        Boolean bold;
+        
+        RunFormat(String fontFamily, Integer fontSize, Boolean bold) {
+            this.fontFamily = fontFamily;
+            this.fontSize = fontSize;
+            this.bold = bold;
+        }
+    }
+    
+    /**
+     * 内部类：保存子章节标题的格式信息（编号部分和内容部分可能不同）
+     */
+    private static class SubSectionFormat {
+        RunFormat numberFormat;  // 编号部分格式（如 5.2.1）
+        RunFormat contentFormat; // 内容部分格式（如 登录功能测试）
+        String styleId;          // 段落样式ID
+        
+        SubSectionFormat() {
+            // 默认格式
+            this.numberFormat = new RunFormat("黑体", 12, false);
+            this.contentFormat = new RunFormat("黑体", 12, false);
+            this.styleId = "4";
+        }
+    }
+    
+    /**
+     * 内部类：保存Caption的格式信息
+     */
+    private static class CaptionFormat {
+        RunFormat format;
+        String styleId;
+        
+        CaptionFormat() {
+            // 默认格式
+            this.format = new RunFormat("黑体", 12, false);
+            this.styleId = "11";
+        }
+    }
+    
+    // 模板格式缓存
+    private SubSectionFormat templateSubSectionFormat = null;
+    private CaptionFormat templateCaptionFormat = null;
 
     /**
      * 处理Word文档，在指定章节插入测试表格
@@ -243,6 +292,20 @@ public class WordProcessor {
                     document, sectionPara, sectionNumber);
                 System.out.println("模块" + sectionNumber + "下已有" + existingSubSectionParas.size() + "个子章节");
                 
+                // 从第一个已存在的子章节提取格式（只提取一次）
+                if (templateSubSectionFormat == null && !existingSubSectionParas.isEmpty()) {
+                    XWPFParagraph firstSubSection = existingSubSectionParas.get(0);
+                    templateSubSectionFormat = extractSubSectionFormat(firstSubSection);
+                    System.out.println("已从模板子章节提取格式");
+                    
+                    // 同时提取Caption格式
+                    XWPFParagraph captionPara = findCaptionAfterSubSection(document, firstSubSection);
+                    if (captionPara != null) {
+                        templateCaptionFormat = extractCaptionFormat(captionPara);
+                        System.out.println("已从模板Caption提取格式");
+                    }
+                }
+                
                 XWPFParagraph currentInsertPoint = lastElementInSection != null ? lastElementInSection : sectionPara;
                 System.out.println("初始插入点: " + (currentInsertPoint != null ? currentInsertPoint.getText() : "null"));
                 
@@ -279,11 +342,15 @@ public class WordProcessor {
                         XWPFParagraph subSectionPara = createSubSectionParagraph(
                             document, currentInsertPoint, subSectionNumber, testCase.getTestName());
                         
+                        // 创建表格标题（Caption）
+                        XWPFParagraph captionPara = createTableCaption(document, subSectionPara, 
+                            subSectionNumber, testCase.getTestName());
+                        
                         // 始终为新创建的子章节创建新表格（不复用已存在的表格）
                         if (templateTable != null) {
-                            // 如果有模板，复制模板表格
+                            // 如果有模板，复制模板表格（在Caption后面）
                             System.out.println("复制模板表格到子章节" + subSectionNumber + "后");
-                            CTTbl newCttbl = copyTable(document, subSectionPara.getCTP(), templateTable.getCTTbl());
+                            CTTbl newCttbl = copyTable(document, captionPara.getCTP(), templateTable.getCTTbl());
                             if (newCttbl != null) {
                                 XWPFTable newTable = new XWPFTable(newCttbl, document);
                                 System.out.println("模板表格复制成功，行数: " + newTable.getNumberOfRows());
@@ -506,7 +573,7 @@ public class WordProcessor {
     }
     
     /**
-     * 更新段落文本
+     * 更新段落文本（去除自动编号，使用模板格式）
      */
     private void updateParagraphText(XWPFParagraph paragraph, String newText) {
         // 清除原有内容
@@ -514,11 +581,71 @@ public class WordProcessor {
             paragraph.removeRun(0);
         }
         
-        // 添加新文本
+        // 关键：显式设置 numId=0 来禁用从样式继承的编号
+        CTP ctp = paragraph.getCTP();
+        CTPPr ppr = ctp.isSetPPr() ? ctp.getPPr() : ctp.addNewPPr();
+        CTNumPr numPr = ppr.isSetNumPr() ? ppr.getNumPr() : ppr.addNewNumPr();
+        CTDecimalNumber numId = numPr.isSetNumId() ? numPr.getNumId() : numPr.addNewNumId();
+        numId.setVal(BigInteger.ZERO);  // numId=0 表示不使用编号
+        
+        // 使用模板格式或默认格式
+        SubSectionFormat subFmt = templateSubSectionFormat != null ? templateSubSectionFormat : new SubSectionFormat();
+        
+        // 解析编号和内容（格式如 "5.2.1 登录功能测试"）
+        int spaceIndex = newText.indexOf(' ');
+        if (spaceIndex > 0) {
+            String number = newText.substring(0, spaceIndex + 1);  // 包含空格
+            String content = newText.substring(spaceIndex + 1);
+            
+            // 编号部分（使用模板格式）
+            XWPFRun numRun = paragraph.createRun();
+            numRun.setText(number);
+            numRun.setFontFamily(subFmt.numberFormat.fontFamily);
+            numRun.setFontSize(subFmt.numberFormat.fontSize);
+            if (subFmt.numberFormat.bold != null) {
+                numRun.setBold(subFmt.numberFormat.bold);
+            }
+            
+            // 内容部分（使用模板格式）
+            XWPFRun contentRun = paragraph.createRun();
+            contentRun.setText(content);
+            contentRun.setFontFamily(subFmt.contentFormat.fontFamily);
+            contentRun.setFontSize(subFmt.contentFormat.fontSize);
+            if (subFmt.contentFormat.bold != null) {
+                contentRun.setBold(subFmt.contentFormat.bold);
+            }
+        } else {
+            // 没有空格，整体使用内容格式
+            XWPFRun run = paragraph.createRun();
+            run.setText(newText);
+            run.setFontFamily(subFmt.contentFormat.fontFamily);
+            run.setFontSize(subFmt.contentFormat.fontSize);
+            if (subFmt.contentFormat.bold != null) {
+                run.setBold(subFmt.contentFormat.bold);
+            }
+        }
+    }
+    
+    /**
+     * 更新Caption文本（使用模板格式）
+     */
+    private void updateCaptionText(XWPFParagraph paragraph, String newText) {
+        // 清除原有内容
+        while (paragraph.getRuns().size() > 0) {
+            paragraph.removeRun(0);
+        }
+        
+        // 使用模板格式或默认格式
+        CaptionFormat captionFmt = templateCaptionFormat != null ? templateCaptionFormat : new CaptionFormat();
+        
+        // 添加新文本（使用模板格式）
         XWPFRun run = paragraph.createRun();
         run.setText(newText);
-        run.setBold(true);
-        run.setFontSize(12);
+        run.setFontFamily(captionFmt.format.fontFamily);
+        run.setFontSize(captionFmt.format.fontSize);
+        if (captionFmt.format.bold != null) {
+            run.setBold(captionFmt.format.bold);
+        }
     }
     
     /**
@@ -550,9 +677,9 @@ public class WordProcessor {
             // 检查是否是Caption样式 (style_id="11")
             if (styleName != null && (styleName.equalsIgnoreCase("Caption") || 
                 styleName.equals("11") || styleName.contains("题注"))) {
-                // 更新Caption文本
+                // 更新Caption文本（黑体，不加粗）
                 String newCaption = "表" + subSectionNumber + " " + testName + "测试";
-                updateParagraphText(para, newCaption);
+                updateCaptionText(para, newCaption);
                 System.out.println("更新表格标题为: " + newCaption);
                 break;
             }
@@ -566,6 +693,241 @@ public class WordProcessor {
                 }
             }
         }
+    }
+    
+    /**
+     * 从Run中提取格式信息（如果Run没有直接格式，则从段落样式推断）
+     */
+    private RunFormat extractRunFormat(XWPFRun run) {
+        if (run == null) {
+            return new RunFormat("黑体", 12, false);
+        }
+        
+        String fontFamily = run.getFontFamily();
+        Integer fontSize = null;
+        Boolean bold = run.isBold();
+        
+        try {
+            int size = run.getFontSize();
+            if (size > 0) {
+                fontSize = size;
+            }
+        } catch (Exception e) {
+            // 忽略
+        }
+        
+        // 如果Run没有直接格式，从段落样式推断默认格式
+        if (fontFamily == null || fontFamily.isEmpty() || fontSize == null || fontSize <= 0) {
+            XWPFParagraph para = (XWPFParagraph) run.getParent();
+            if (para != null) {
+                String styleId = para.getStyle();
+                // 根据样式ID推断格式
+                // Heading 3 (ID=4): 黑体
+                // Caption (ID=11): 黑体
+                if (styleId != null) {
+                    if (styleId.equals("4") || styleId.toLowerCase().contains("heading")) {
+                        if (fontFamily == null || fontFamily.isEmpty()) {
+                            fontFamily = "黑体";
+                        }
+                    } else if (styleId.equals("11") || styleId.toLowerCase().contains("caption")) {
+                        if (fontFamily == null || fontFamily.isEmpty()) {
+                            fontFamily = "黑体";
+                        }
+                    }
+                }
+            }
+        }
+        
+        // 最终默认值
+        if (fontFamily == null || fontFamily.isEmpty()) {
+            fontFamily = "黑体";
+        }
+        if (fontSize == null || fontSize <= 0) {
+            fontSize = 12;  // 默认小四号
+        }
+        
+        return new RunFormat(fontFamily, fontSize, bold);
+    }
+    
+    /**
+     * 从模板子章节段落中提取格式
+     * 分析编号部分和内容部分的格式（可能不同）
+     * 
+     * 对于 Heading 3 样式，Word 模板通常使用自动编号：
+     * - 编号部分：黑体 10号字体
+     * - 内容部分：黑体 12pt (小四号)
+     */
+    private SubSectionFormat extractSubSectionFormat(XWPFParagraph templatePara) {
+        SubSectionFormat format = new SubSectionFormat();
+        
+        if (templatePara == null) {
+            return format;
+        }
+        
+        // 获取样式ID
+        String styleId = templatePara.getStyle();
+        if (styleId != null) {
+            format.styleId = styleId;
+        }
+        
+        List<XWPFRun> runs = templatePara.getRuns();
+        
+        // 对于 Heading 3 样式，通常使用自动编号，内容文本没有编号
+        // 根据模板的样式，默认格式为：
+        // - 编号：黑体 10号
+        // - 内容：黑体 12pt
+        boolean isHeading3 = styleId != null && 
+            (styleId.equals("4") || styleId.toLowerCase().contains("heading"));
+        
+        if (isHeading3) {
+            // Heading 3 的默认格式
+            format.numberFormat = new RunFormat("黑体", 10, false);  // 编号用10号字体
+            format.contentFormat = new RunFormat("黑体", 12, false); // 内容用12pt (小四号)
+        } else if (runs != null && !runs.isEmpty()) {
+            // 其他样式，从 Run 中提取
+            if (runs.size() >= 2) {
+                format.numberFormat = extractRunFormat(runs.get(0));
+                format.contentFormat = extractRunFormat(runs.get(1));
+            } else {
+                RunFormat singleFormat = extractRunFormat(runs.get(0));
+                format.numberFormat = singleFormat;
+                format.contentFormat = singleFormat;
+            }
+        }
+        
+        System.out.println("提取子章节格式: 编号[" + format.numberFormat.fontFamily + ", " + 
+            format.numberFormat.fontSize + "pt], 内容[" + format.contentFormat.fontFamily + ", " + 
+            format.contentFormat.fontSize + "pt]");
+        
+        return format;
+    }
+    
+    /**
+     * 从模板Caption段落中提取格式
+     * 
+     * Caption 样式默认格式：
+     * - 黑体 12pt (小四号)
+     */
+    private CaptionFormat extractCaptionFormat(XWPFParagraph templateCaption) {
+        CaptionFormat format = new CaptionFormat();
+        
+        if (templateCaption == null) {
+            return format;
+        }
+        
+        // 获取样式ID
+        String styleId = templateCaption.getStyle();
+        if (styleId != null) {
+            format.styleId = styleId;
+        }
+        
+        // 对于 Caption 样式，使用默认格式：黑体 12pt
+        boolean isCaption = styleId != null && 
+            (styleId.equals("11") || styleId.toLowerCase().contains("caption"));
+        
+        if (isCaption) {
+            format.format = new RunFormat("黑体", 12, false);
+        } else {
+            List<XWPFRun> runs = templateCaption.getRuns();
+            if (runs != null && !runs.isEmpty()) {
+                format.format = extractRunFormat(runs.get(0));
+            }
+        }
+        
+        System.out.println("提取Caption格式: [" + format.format.fontFamily + ", " + 
+            format.format.fontSize + "pt, bold=" + format.format.bold + "]");
+        
+        return format;
+    }
+    
+    /**
+     * 在子章节段落后查找Caption段落（用于提取格式）
+     */
+    private XWPFParagraph findCaptionAfterSubSection(XWPFDocument document, XWPFParagraph subSectionPara) {
+        List<XWPFParagraph> paragraphs = document.getParagraphs();
+        
+        int subIndex = -1;
+        for (int i = 0; i < paragraphs.size(); i++) {
+            if (paragraphs.get(i).getCTP() == subSectionPara.getCTP()) {
+                subIndex = i;
+                break;
+            }
+        }
+        
+        if (subIndex == -1) {
+            return null;
+        }
+        
+        // 在子章节后找Caption（通常在2-3个段落内）
+        for (int i = subIndex + 1; i < paragraphs.size() && i < subIndex + 5; i++) {
+            XWPFParagraph para = paragraphs.get(i);
+            String styleName = para.getStyle();
+            String text = para.getText();
+            
+            // Caption样式或以"表"开头的文本
+            if (styleName != null && (styleName.equalsIgnoreCase("Caption") ||
+                styleName.equals("11") || styleName.contains("题注"))) {
+                return para;
+            }
+            if (text != null && text.trim().startsWith("表")) {
+                return para;
+            }
+        }
+        
+        return null;
+    }
+
+    /**
+     * 创建表格标题（Caption）
+     */
+    private XWPFParagraph createTableCaption(XWPFDocument document, XWPFParagraph afterPara,
+                                              String subSectionNumber, String testName) {
+        CTBody body = document.getDocument().getBody();
+        CTP afterCTP = afterPara.getCTP();
+        
+        // 找到afterPara在body中的位置
+        int afterIndex = -1;
+        for (int i = 0; i < body.sizeOfPArray(); i++) {
+            if (body.getPArray(i) == afterCTP) {
+                afterIndex = i;
+                break;
+            }
+        }
+        
+        if (afterIndex == -1) {
+            afterIndex = body.sizeOfPArray() - 1;
+        }
+        
+        // 在afterIndex+1位置插入Caption段落
+        CTP ctp = body.insertNewP(afterIndex + 1);
+        XWPFParagraph para = new XWPFParagraph(ctp, document);
+        
+        // 使用模板格式或默认格式
+        CaptionFormat captionFmt = templateCaptionFormat != null ? templateCaptionFormat : new CaptionFormat();
+        
+        // 设置Caption样式
+        try {
+            para.setStyle(captionFmt.styleId);
+        } catch (Exception e) {
+            // 忽略样式设置失败
+        }
+        
+        // 设置Caption内容（使用模板格式）
+        String captionText = "表" + subSectionNumber + " " + testName + "测试";
+        XWPFRun run = para.createRun();
+        run.setText(captionText);
+        run.setFontFamily(captionFmt.format.fontFamily);
+        run.setFontSize(captionFmt.format.fontSize);
+        if (captionFmt.format.bold != null) {
+            run.setBold(captionFmt.format.bold);
+        }
+        
+        // 设置居中对齐
+        para.setAlignment(ParagraphAlignment.CENTER);
+        
+        System.out.println("创建表格标题: " + captionText);
+        
+        return para;
     }
 
     /**
@@ -625,24 +987,49 @@ public class WordProcessor {
             afterIndex = body.sizeOfPArray() - 1;
         }
         
-        // 在afterIndex+1位置插入新段落
+        // 在afterIndex+1位置插入新段落（子章节标题）
         CTP ctp = body.insertNewP(afterIndex + 1);
         XWPFParagraph para = new XWPFParagraph(ctp, document);
 
-        // 不使用Heading样式（避免自动编号导致双编号问题）
-        // 直接设置格式为加粗、小四号字体
+        // 使用模板格式或默认格式
+        SubSectionFormat subFmt = templateSubSectionFormat != null ? templateSubSectionFormat : new SubSectionFormat();
         
-        // 设置标题内容：编号 + 名称
+        // 设置样式
+        try {
+            para.setStyle(subFmt.styleId);
+        } catch (Exception e) {
+            // 忽略样式设置失败
+        }
+        
+        // 关键：显式设置 numId=0 来禁用从样式继承的编号
+        // 这是因为 Heading 3 样式定义中包含 numPr
+        CTPPr ppr = ctp.isSetPPr() ? ctp.getPPr() : ctp.addNewPPr();
+        CTNumPr numPr = ppr.isSetNumPr() ? ppr.getNumPr() : ppr.addNewNumPr();
+        CTDecimalNumber numId = numPr.isSetNumId() ? numPr.getNumId() : numPr.addNewNumId();
+        numId.setVal(BigInteger.ZERO);  // numId=0 表示不使用编号
+        
+        // 设置标题内容（使用模板格式）
         String subTitle = moduleNumber + " " + testName + "测试";
-        XWPFRun run = para.createRun();
-        run.setText(subTitle);
-        run.setBold(true);
-        run.setFontSize(12); // 小四号字体
-        run.setFontFamily("宋体"); // 设置字体
+        // 编号部分
+        XWPFRun numRun = para.createRun();
+        numRun.setText(moduleNumber + " ");
+        numRun.setFontFamily(subFmt.numberFormat.fontFamily);
+        numRun.setFontSize(subFmt.numberFormat.fontSize);
+        if (subFmt.numberFormat.bold != null) {
+            numRun.setBold(subFmt.numberFormat.bold);
+        }
+        
+        // 内容部分
+        XWPFRun contentRun = para.createRun();
+        contentRun.setText(testName + "测试");
+        contentRun.setFontFamily(subFmt.contentFormat.fontFamily);
+        contentRun.setFontSize(subFmt.contentFormat.fontSize);
+        if (subFmt.contentFormat.bold != null) {
+            contentRun.setBold(subFmt.contentFormat.bold);
+        }
 
         // 设置段落格式
         para.setAlignment(ParagraphAlignment.LEFT);
-        CTPPr ppr = ctp.isSetPPr() ? ctp.getPPr() : ctp.addNewPPr();
         CTSpacing spacing = ppr.isSetSpacing() ? ppr.getSpacing() : ppr.addNewSpacing();
         spacing.setAfter(BigInteger.valueOf(120)); // 段后间距
         
