@@ -2,6 +2,7 @@ package pub.developers.docautogenbyexcel.reader;
 
 import org.apache.poi.ss.usermodel.*;
 import org.apache.poi.xssf.usermodel.XSSFWorkbook;
+import pub.developers.docautogenbyexcel.config.TableConfig;
 import pub.developers.docautogenbyexcel.model.ModuleData;
 import pub.developers.docautogenbyexcel.model.TestCase;
 
@@ -13,16 +14,11 @@ import java.util.*;
 /**
  * Excel数据读取模块
  * 负责读取Excel文件，解析测试用例数据，并按模块分组
+ * 自动搜索包含"模块编号"列的Sheet作为测试用例数据源
  */
 public class ExcelReader {
     
-    // 必填列名
-    private static final String COL_MODULE_NUMBER = "模块编号";
-    
-    // 保留这些列名作为兼容性检查，但不再强制要求
-    private static final Set<String> OPTIONAL_COLUMNS = new HashSet<>(Arrays.asList(
-            "testName", "id", "content", "strategy", "criteria", "stopCondition", "trace"
-    ));
+    private final TableConfig config = TableConfig.getInstance();
 
     /**
      * 读取Excel文件并返回按模块分组的数据
@@ -43,39 +39,58 @@ public class ExcelReader {
         }
 
         Map<String, ModuleData> moduleDataMap = new LinkedHashMap<>();
+        String requiredColumn = config.getTestCaseRequiredColumn();
         
         try (FileInputStream fis = new FileInputStream(file);
              Workbook workbook = new XSSFWorkbook(fis)) {
             
-            Sheet sheet = workbook.getSheetAt(0);
-            if (sheet == null || sheet.getPhysicalNumberOfRows() == 0) {
-                throw new Exception("Excel文件为空或没有数据");
-            }
-
-            // 读取表头，确定列索引和列名
-            Row headerRow = sheet.getRow(0);
-            if (headerRow == null) {
-                throw new Exception("Excel文件缺少表头行");
-            }
-
-            // 读取所有列名（按顺序）
+            // 自动搜索包含必填列的Sheet
+            Sheet sheet = null;
+            String foundSheetName = null;
             List<String> columnNames = new ArrayList<>();
             Map<String, Integer> columnIndexMap = new HashMap<>();
             
-            for (int i = 0; i < headerRow.getLastCellNum(); i++) {
-                Cell cell = headerRow.getCell(i);
-                String cellValue = getCellValueAsString(cell);
-                if (cellValue != null && !cellValue.trim().isEmpty()) {
-                    String columnName = cellValue.trim();
-                    columnNames.add(columnName);
-                    columnIndexMap.put(columnName, i);
+            for (int sheetIdx = 0; sheetIdx < workbook.getNumberOfSheets(); sheetIdx++) {
+                Sheet candidateSheet = workbook.getSheetAt(sheetIdx);
+                if (candidateSheet == null || candidateSheet.getPhysicalNumberOfRows() == 0) {
+                    continue;
+                }
+                
+                Row headerRow = candidateSheet.getRow(0);
+                if (headerRow == null) {
+                    continue;
+                }
+                
+                // 读取列名
+                List<String> candidateColumns = new ArrayList<>();
+                Map<String, Integer> candidateColumnIndex = new HashMap<>();
+                
+                for (int i = 0; i < headerRow.getLastCellNum(); i++) {
+                    Cell cell = headerRow.getCell(i);
+                    String cellValue = getCellValueAsString(cell);
+                    if (cellValue != null && !cellValue.trim().isEmpty()) {
+                        String columnName = cellValue.trim();
+                        candidateColumns.add(columnName);
+                        candidateColumnIndex.put(columnName, i);
+                    }
+                }
+                
+                // 检查是否包含必填列
+                if (candidateColumnIndex.containsKey(requiredColumn)) {
+                    sheet = candidateSheet;
+                    foundSheetName = candidateSheet.getSheetName();
+                    columnNames = candidateColumns;
+                    columnIndexMap = candidateColumnIndex;
+                    System.out.println("找到测试用例Sheet: " + foundSheetName + " (包含'" + requiredColumn + "'列)");
+                    break;
                 }
             }
-
-            // 验证必填列（模块编号）
-            if (!columnIndexMap.containsKey(COL_MODULE_NUMBER)) {
-                throw new Exception("Excel缺少必填列: " + COL_MODULE_NUMBER);
+            
+            if (sheet == null) {
+                throw new Exception("未找到包含'" + requiredColumn + "'列的Sheet，请确保Excel中有测试用例数据");
             }
+            
+            Row headerRow = sheet.getRow(0);
 
             // 读取数据行
             int totalRows = sheet.getPhysicalNumberOfRows();
@@ -121,7 +136,8 @@ public class ExcelReader {
      * 读取一行数据，转换为TestCase对象（包含所有列）
      */
     private TestCase readTestCase(Row row, Map<String, Integer> columnIndexMap, List<String> columnNames) {
-        String moduleNumber = getCellValue(row, columnIndexMap.get(COL_MODULE_NUMBER));
+        String requiredColumn = config.getTestCaseRequiredColumn();
+        String moduleNumber = getCellValue(row, columnIndexMap.get(requiredColumn));
         
         // 验证必填字段
         if (moduleNumber == null || moduleNumber.trim().isEmpty()) {
@@ -133,7 +149,7 @@ public class ExcelReader {
         // 读取所有列的数据
         for (String columnName : columnNames) {
             // 跳过模块编号列（已经设置）
-            if (COL_MODULE_NUMBER.equals(columnName)) {
+            if (requiredColumn.equals(columnName)) {
                 continue;
             }
             

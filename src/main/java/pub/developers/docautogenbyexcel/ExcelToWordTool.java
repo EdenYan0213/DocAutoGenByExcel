@@ -1,12 +1,19 @@
 package pub.developers.docautogenbyexcel;
 
 import org.apache.commons.cli.*;
+import org.apache.poi.xwpf.usermodel.XWPFDocument;
 import pub.developers.docautogenbyexcel.config.ConfigLoader;
+import pub.developers.docautogenbyexcel.processor.TableFillProcessor;
 import pub.developers.docautogenbyexcel.processor.WordProcessor;
 import pub.developers.docautogenbyexcel.reader.ExcelReader;
+import pub.developers.docautogenbyexcel.reader.TableDataReader;
+import pub.developers.docautogenbyexcel.reader.TableDataReader.BasicInfoData;
+import pub.developers.docautogenbyexcel.reader.TableDataReader.ListTableData;
 import pub.developers.docautogenbyexcel.util.FileUtil;
 
 import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileOutputStream;
 import java.util.Map;
 
 /**
@@ -44,7 +51,11 @@ public class ExcelToWordTool {
                 moduleDataMap
             );
             
-            System.out.println("生成成功！输出文件: " + outputPath);
+            // 处理基本信息和列表型表格
+            System.out.println("\n开始处理其他表格（基本信息、接口信息等）...");
+            processAdditionalTables(config.getExcelPath(), outputPath);
+            
+            System.out.println("\n生成成功！输出文件: " + outputPath);
             System.out.println("成功处理 " + successCount + " 个模块");
             
         } catch (Exception e) {
@@ -144,14 +155,59 @@ public class ExcelToWordTool {
     }
 
     /**
+     * 处理其他表格（基本信息、列表型表格等）
+     * 根据Excel内容自动识别Sheet类型，不依赖Sheet名称
+     */
+    private static void processAdditionalTables(String excelPath, String outputPath) {
+        try {
+            TableDataReader tableReader = new TableDataReader();
+            TableFillProcessor tableFillProcessor = new TableFillProcessor();
+            
+            // 读取基本信息
+            Map<String, BasicInfoData> basicInfoMap = tableReader.readBasicInfo(excelPath);
+            
+            // 读取所有列表型表格数据（自动识别，排除测试用例和基本信息Sheet）
+            Map<String, ListTableData> allListData = tableReader.readAllListTableData(excelPath);
+            
+            // 如果有数据需要填充
+            if (!basicInfoMap.isEmpty() || !allListData.isEmpty()) {
+                // 打开文档进行二次处理
+                try (FileInputStream fis = new FileInputStream(outputPath);
+                     XWPFDocument document = new XWPFDocument(fis)) {
+                    
+                    int basicInfoCount = tableFillProcessor.fillBasicInfoTables(document, basicInfoMap);
+                    int listCount = tableFillProcessor.fillListTables(document, allListData);
+                    
+                    // 保存文档
+                    try (FileOutputStream fos = new FileOutputStream(outputPath)) {
+                        document.write(fos);
+                    }
+                    
+                    if (basicInfoCount > 0) {
+                        System.out.println("填充基本信息表格: " + basicInfoCount + " 个");
+                    }
+                    if (listCount > 0) {
+                        System.out.println("填充列表型表格: " + listCount + " 个");
+                    }
+                }
+            }
+        } catch (Exception e) {
+            System.out.println("处理其他表格时出现警告: " + e.getMessage());
+            e.printStackTrace();
+            // 不中断主流程
+        }
+    }
+    
+    /**
      * 打印帮助信息
      */
     private static void printHelp(Options options) {
         HelpFormatter formatter = new HelpFormatter();
         formatter.printHelp("ExcelToWordTool", options);
         System.out.println("\n使用示例:");
-        System.out.println("  java -jar ExcelToWordTool.jar -excel \"D:\\data.xlsx\" -word \"D:\\template.docx\" -out \"D:\\output\"");
-        System.out.println("  java -jar ExcelToWordTool.jar -config  # 使用config.properties配置文件");
+        System.out.println("  java -jar DocAutoGenByExcel-0.0.1-SNAPSHOT.jar -excel \"data.xlsx\" -word \"template.docx\" -out \"output\"");
+        System.out.println("  java -jar DocAutoGenByExcel-0.0.1-SNAPSHOT.jar -config  # 使用config.properties配置文件");
+        System.out.println("\n详细说明请参考 README.md");
     }
 }
 
