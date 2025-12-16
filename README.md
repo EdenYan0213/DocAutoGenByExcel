@@ -165,7 +165,7 @@ debug.enabled=false
 ```bash
 java -jar DocAutoGenByExcel-0.0.1-SNAPSHOT.jar [选项]
 ```
-
+java -jar target/DocAutoGenByExcel-0.0.1-SNAPSHOT.jar -excel test_data_enhanced.xlsx -word 1-XX测试大纲（公开）_副本.docx -out output
 **选项说明**：
 
 - `-excel <路径>`：Excel文件路径（必填）

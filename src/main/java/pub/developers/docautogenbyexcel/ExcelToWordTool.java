@@ -3,6 +3,7 @@ package pub.developers.docautogenbyexcel;
 import org.apache.commons.cli.*;
 import org.apache.poi.xwpf.usermodel.XWPFDocument;
 import pub.developers.docautogenbyexcel.config.ConfigLoader;
+import pub.developers.docautogenbyexcel.model.ModuleData;
 import pub.developers.docautogenbyexcel.processor.TableFillProcessor;
 import pub.developers.docautogenbyexcel.processor.WordProcessor;
 import pub.developers.docautogenbyexcel.reader.ExcelReader;
@@ -33,8 +34,7 @@ public class ExcelToWordTool {
             // 读取Excel数据
             System.out.println("开始读取Excel数据");
             ExcelReader excelReader = new ExcelReader();
-            Map<String, pub.developers.docautogenbyexcel.model.ModuleData> moduleDataMap = 
-                excelReader.readExcel(config.getExcelPath());
+            Map<String, ModuleData> moduleDataMap = excelReader.readExcel(config.getExcelPath());
             
             // 生成输出文件路径（generateOutputFileName 已经确保目录存在）
             String outputPath = FileUtil.generateOutputFileName(

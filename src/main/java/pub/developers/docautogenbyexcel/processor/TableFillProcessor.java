@@ -35,25 +35,22 @@ public class TableFillProcessor {
         
         int filledCount = 0;
         List<XWPFTable> tables = document.getTables();
-        List<XWPFParagraph> paragraphs = document.getParagraphs();
-        
+
         // 遍历所有表格
-        for (int tableIdx = 0; tableIdx < tables.size(); tableIdx++) {
-            XWPFTable table = tables.get(tableIdx);
-            
+        for (XWPFTable table : tables) {
             // 查找表格前面的Caption
             String tableCaption = findTableCaption(document, table);
             if (tableCaption == null || tableCaption.isEmpty()) {
                 continue;
             }
-            
+
             System.out.println("检查表格Caption: " + tableCaption);
-            
+
             // 检查是否匹配任何基本信息表格
             for (Map.Entry<String, BasicInfoData> entry : basicInfoMap.entrySet()) {
                 String targetName = entry.getKey();
                 BasicInfoData data = entry.getValue();
-                
+
                 // 匹配表格名称（可以是完全匹配或包含匹配）
                 if (captionMatches(tableCaption, targetName)) {
                     System.out.println("找到匹配的基本信息表格: " + targetName);
@@ -117,13 +114,11 @@ public class TableFillProcessor {
         List<IBodyElement> elements = document.getBodyElements();
         
         for (int i = 0; i < elements.size(); i++) {
-            if (elements.get(i) instanceof XWPFTable) {
-                XWPFTable currentTable = (XWPFTable) elements.get(i);
+            if (elements.get(i) instanceof XWPFTable currentTable) {
                 if (currentTable.getCTTbl() == table.getCTTbl()) {
                     // 找到表格，向前查找Caption
                     for (int j = i - 1; j >= 0 && j >= i - 3; j--) {
-                        if (elements.get(j) instanceof XWPFParagraph) {
-                            XWPFParagraph para = (XWPFParagraph) elements.get(j);
+                        if (elements.get(j) instanceof XWPFParagraph para) {
                             String text = para.getText().trim();
                             String style = para.getStyle();
                             

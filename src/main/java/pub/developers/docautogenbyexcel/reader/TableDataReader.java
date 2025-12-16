@@ -12,11 +12,9 @@ import java.util.*;
  * 表格数据读取器
  * 读取Excel中的基本信息和列表型表格数据
  * 根据Sheet内容自动识别数据类型，不依赖Sheet名称
- * 
  * 基本信息Sheet格式（根据配置文件识别）:
  * | 表格名称 | 字段名 | 字段值 |
  * | 表1.1 被测软件基本信息 | 软件等级 | D |
- * 
  * 列表型Sheet格式（根据配置文件识别）:
  * | 表格名称 | 序号 | 接口类型 | 方向 | 说明 |
  * | 表1.2 被测软件接口信息 | 1 | 串口 | 输入 | 接收控制命令 |
@@ -30,8 +28,8 @@ public class TableDataReader {
      * Map<表格名称, Map<字段名, 字段值>>
      */
     public static class BasicInfoData {
-        private String tableName;
-        private Map<String, String> fields = new LinkedHashMap<>();
+        private final String tableName;
+        private final Map<String, String> fields = new LinkedHashMap<>();
         
         public BasicInfoData(String tableName) {
             this.tableName = tableName;
@@ -59,9 +57,9 @@ public class TableDataReader {
      * 每行是一个Map<列名, 值>
      */
     public static class ListTableData {
-        private String tableName;
+        private final String tableName;
         private List<String> columnNames = new ArrayList<>();
-        private List<Map<String, String>> rows = new ArrayList<>();
+        private final List<Map<String, String>> rows = new ArrayList<>();
         
         public ListTableData(String tableName) {
             this.tableName = tableName;
@@ -167,85 +165,7 @@ public class TableDataReader {
         
         return result;
     }
-    
-    /**
-     * 读取列表型表格数据
-     * 从Sheet "接口信息" 或其他列表型Sheet读取
-     * 
-     * @param excelPath Excel文件路径
-     * @param sheetName Sheet名称
-     * @return Map<表格名称, ListTableData>
-     */
-    public Map<String, ListTableData> readListTableData(String excelPath, String sheetName) throws Exception {
-        Map<String, ListTableData> result = new LinkedHashMap<>();
-        
-        File file = new File(excelPath);
-        if (!file.exists()) {
-            System.out.println("Excel文件不存在: " + excelPath);
-            return result;
-        }
-        
-        try (FileInputStream fis = new FileInputStream(file);
-             Workbook workbook = new XSSFWorkbook(fis)) {
-            
-            Sheet sheet = workbook.getSheet(sheetName);
-            if (sheet == null) {
-                System.out.println("未找到 '" + sheetName + "' Sheet，跳过读取");
-                return result;
-            }
-            
-            // 读取表头（第一行）
-            Row headerRow = sheet.getRow(0);
-            if (headerRow == null) {
-                return result;
-            }
-            
-            // 读取列名（从第二列开始，第一列是表格名称）
-            List<String> columnNames = new ArrayList<>();
-            for (int c = 1; c < headerRow.getLastCellNum(); c++) {
-                String colName = getCellValue(headerRow.getCell(c));
-                if (colName != null && !colName.trim().isEmpty()) {
-                    columnNames.add(colName.trim());
-                }
-            }
-            
-            if (columnNames.isEmpty()) {
-                System.out.println(sheetName + " Sheet没有数据列");
-                return result;
-            }
-            
-            // 读取数据行
-            for (int i = 1; i <= sheet.getLastRowNum(); i++) {
-                Row row = sheet.getRow(i);
-                if (row == null) continue;
-                
-                String tableName = getCellValue(row.getCell(0));
-                if (tableName == null || tableName.trim().isEmpty()) continue;
-                tableName = tableName.trim();
-                
-                // 获取或创建 ListTableData
-                ListTableData data = result.get(tableName);
-                if (data == null) {
-                    data = new ListTableData(tableName);
-                    data.setColumnNames(columnNames);
-                    result.put(tableName, data);
-                }
-                
-                // 读取行数据
-                Map<String, String> rowData = new LinkedHashMap<>();
-                for (int c = 0; c < columnNames.size(); c++) {
-                    String value = getCellValue(row.getCell(c + 1));
-                    rowData.put(columnNames.get(c), value != null ? value.trim() : "");
-                }
-                data.addRow(rowData);
-            }
-            
-            System.out.println("读取" + sheetName + "完成，共" + result.size() + "个表格");
-        }
-        
-        return result;
-    }
-    
+
     /**
      * 读取所有列表型表格数据
      * 自动识别列表型Sheet（第一列是配置的表格名称列）
