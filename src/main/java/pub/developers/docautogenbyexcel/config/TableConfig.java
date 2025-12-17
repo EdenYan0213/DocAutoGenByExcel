@@ -157,5 +157,12 @@ public class TableConfig {
         }
         return headerColumns.get(0).equals(getListDataTableNameColumn());
     }
+    
+    /**
+     * 获取Properties对象（用于扩展配置加载）
+     */
+    public static Properties getProperties() {
+        return getInstance().properties;
+    }
 }
 
