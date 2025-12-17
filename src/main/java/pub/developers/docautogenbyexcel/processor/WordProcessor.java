@@ -21,10 +21,17 @@ import java.util.regex.Pattern;
  */
 public class WordProcessor {
     
-    // 章节标题匹配模式：X.X 模块名称（X为数字）
-    private static final Pattern SECTION_PATTERN = Pattern.compile("^(\\d+\\.\\d+)\\s+(.+)$");
-    // 占位符匹配模式：X.x 表示该章节下有多个子章节
-    private static final Pattern PLACEHOLDER_PATTERN = Pattern.compile("^(\\d+)\\.x\\s*(.+)?$", Pattern.CASE_INSENSITIVE);
+    // 通用章节编号模式：匹配任意层级的编号，如 1, 1.1, 1.1.1, 1.1.1.1 等
+    private static final Pattern SECTION_NUMBER_PATTERN = Pattern.compile("^(\\d+(?:\\.\\d+)*)\\s+(.+)$");
+    // 章节标题匹配模式：X.X 模块名称（保留向后兼容，但推荐使用 SECTION_NUMBER_PATTERN）
+    private static final Pattern SECTION_PATTERN = SECTION_NUMBER_PATTERN;
+    // 占位符匹配模式：X.x 或 X.X.x 等，表示该章节下有多个子章节
+    private static final Pattern PLACEHOLDER_PATTERN = Pattern.compile("^(\\d+(?:\\.\\d+)*)\\.x\\s*(.+)?$", Pattern.CASE_INSENSITIVE);
+    
+    // 目录样式 ID: 22=toc1, 25=toc2, 16=toc3
+    private static final java.util.Set<String> TOC_STYLES = java.util.Set.of("22", "25", "16");
+    // 正文标题样式 ID: 2=Heading1, 3=Heading2, 4=Heading3, 5=Heading4
+    private static final java.util.Set<String> HEADING_STYLES = java.util.Set.of("2", "3", "4", "5");
     
     /**
      * 内部类：保存Run的格式信息
@@ -74,6 +81,176 @@ public class WordProcessor {
     // 模板格式缓存
     private SubSectionFormat templateSubSectionFormat = null;
     private CaptionFormat templateCaptionFormat = null;
+    
+    // ==================== 目录编号辅助方法 ====================
+    
+    /** 
+     * 通用的章节编号正则模式（匹配任意层级）
+     * 如：1, 1.1, 1.1.1, 1.1.1.1 等
+     */
+    private static final Pattern GENERIC_SECTION_NUMBER = Pattern.compile("^\\d+(\\.\\d+)*$");
+    
+    /** 判断是否为有效的章节编号（任意层级） */
+    private static boolean isValidSectionNumber(String text) {
+        return text != null && GENERIC_SECTION_NUMBER.matcher(text.trim()).matches();
+    }
+    
+    /** 获取章节编号的层级数（如 "5.3.1" 返回 3） */
+    private static int getSectionLevel(String sectionNumber) {
+        if (sectionNumber == null || sectionNumber.isEmpty()) {
+            return 0;
+        }
+        return sectionNumber.split("\\.").length;
+    }
+    
+    /** 获取父章节编号（如 "5.3.1" 返回 "5.3"，"5.3" 返回 "5"，"5" 返回 null） */
+    private static String getParentSectionNumber(String sectionNumber) {
+        if (sectionNumber == null || sectionNumber.isEmpty()) {
+            return null;
+        }
+        int lastDot = sectionNumber.lastIndexOf('.');
+        if (lastDot <= 0) {
+            return null;
+        }
+        return sectionNumber.substring(0, lastDot);
+    }
+    
+    /** 判断 childNumber 是否是 parentNumber 的直接子节点 */
+    private static boolean isDirectChild(String parentNumber, String childNumber) {
+        if (parentNumber == null || childNumber == null) {
+            return false;
+        }
+        // 子节点必须以父节点开头，且比父节点多一层
+        if (!childNumber.startsWith(parentNumber + ".")) {
+            return false;
+        }
+        String suffix = childNumber.substring(parentNumber.length() + 1);
+        // 后缀应该只是一个数字，不包含更多的点
+        return suffix.matches("^\\d+$");
+    }
+    
+    /** 判断 descendant 是否是 ancestor 的后代节点（任意层级） */
+    private static boolean isDescendant(String ancestor, String descendant) {
+        if (ancestor == null || descendant == null) {
+            return false;
+        }
+        return descendant.startsWith(ancestor + ".");
+    }
+    
+    /** 从章节编号生成匹配直接子节点的正则模式 */
+    private static Pattern getDirectChildPattern(String parentNumber) {
+        // 匹配 parentNumber.X 格式，其中 X 是一个或多个数字
+        String escaped = Pattern.quote(parentNumber);
+        return Pattern.compile("^" + escaped + "\\.\\d+$");
+    }
+    
+    /** 比较两个章节编号的大小（支持任意层级）
+     * 如 "1.2" < "1.10" < "2.1" < "2.1.1"
+     */
+    private static int compareSectionNumbers(String a, String b) {
+        if (a == null && b == null) return 0;
+        if (a == null) return -1;
+        if (b == null) return 1;
+        
+        String[] partsA = a.split("\\.");
+        String[] partsB = b.split("\\.");
+        
+        int minLen = Math.min(partsA.length, partsB.length);
+        for (int i = 0; i < minLen; i++) {
+            try {
+                int numA = Integer.parseInt(partsA[i]);
+                int numB = Integer.parseInt(partsB[i]);
+                if (numA != numB) {
+                    return Integer.compare(numA, numB);
+                }
+            } catch (NumberFormatException e) {
+                int cmp = partsA[i].compareTo(partsB[i]);
+                if (cmp != 0) return cmp;
+            }
+        }
+        // 如果所有相同位置的部分都相等，层级少的排在前面
+        return Integer.compare(partsA.length, partsB.length);
+    }
+    
+    // ==================== 样式判断辅助方法 ====================
+    
+    /** 判断是否为目录样式 */
+    private static boolean isTocStyle(String styleName) {
+        return styleName != null && 
+            (TOC_STYLES.contains(styleName) || styleName.toLowerCase().startsWith("toc"));
+    }
+    
+    /** 判断是否为标题样式（包括Heading 1-4） */
+    private static boolean isHeadingStyle(String styleName) {
+        return styleName != null && 
+            (HEADING_STYLES.contains(styleName) || 
+             styleName.toLowerCase().contains("heading") ||
+             styleName.contains("标题") ||
+             styleName.contains("程序标题"));
+    }
+    
+    /** 判断是否为 Heading 2（主章节样式） */
+    private static boolean isHeading2Style(String styleId) {
+        return styleId != null && 
+            (styleId.equals("3") || styleId.toLowerCase().contains("heading 2"));
+    }
+    
+    /** 判断是否为主章节样式（Heading 1 或 Heading 2） */
+    private static boolean isMainSectionStyle(String styleName) {
+        return styleName != null && 
+            (styleName.equals("2") || styleName.equals("3") || 
+             styleName.toLowerCase().contains("heading 1") ||
+             styleName.toLowerCase().contains("heading 2") ||
+             styleName.contains("标题 1") || styleName.contains("标题 2"));
+    }
+    
+    /** 判断是否为子章节样式（Heading 3 或 Heading 4） */
+    private static boolean isSubSectionStyle(String styleName) {
+        return styleName != null && 
+            (styleName.equals("4") || styleName.equals("5") ||
+             styleName.toLowerCase().contains("heading 3") || 
+             styleName.toLowerCase().contains("heading 4") ||
+             styleName.contains("标题 3") || styleName.contains("程序标题"));
+    }
+    
+    // ==================== 通用辅助方法 ====================
+    
+    /** 在段落列表中查找段落的索引 */
+    private static int findParagraphIndex(List<XWPFParagraph> paragraphs, XWPFParagraph target) {
+        for (int i = 0; i < paragraphs.size(); i++) {
+            if (paragraphs.get(i).getCTP() == target.getCTP()) {
+                return i;
+            }
+        }
+        return -1;
+    }
+    
+    /** 在CTBody中查找段落的索引 */
+    private static int findParagraphIndexInBody(CTBody body, CTP paragraph) {
+        for (int i = 0; i < body.sizeOfPArray(); i++) {
+            if (body.getPArray(i) == paragraph) {
+                return i;
+            }
+        }
+        return -1;
+    }
+    
+    /** 禁用段落的编号（设置 numId=0） */
+    private static void disableParagraphNumbering(CTP ctp) {
+        CTPPr ppr = ctp.isSetPPr() ? ctp.getPPr() : ctp.addNewPPr();
+        CTNumPr numPr = ppr.isSetNumPr() ? ppr.getNumPr() : ppr.addNewNumPr();
+        CTDecimalNumber numId = numPr.isSetNumId() ? numPr.getNumId() : numPr.addNewNumId();
+        numId.setVal(BigInteger.ZERO);
+    }
+    
+    /** 设置Run的格式 */
+    private static void applyRunFormat(XWPFRun run, RunFormat format) {
+        run.setFontFamily(format.fontFamily);
+        run.setFontSize(format.fontSize);
+        if (format.bold != null) {
+            run.setBold(format.bold);
+        }
+    }
 
     /**
      * 处理Word文档，在指定章节插入测试表格
@@ -167,25 +344,20 @@ public class WordProcessor {
             
             // 2. 处理占位符：自动创建子章节
             for (PlaceholderInfo placeholder : placeholders) {
-                String parentNumber = placeholder.parentNumber; // 如 "5"
-                String placeholderText = placeholder.text; // 如 "5.x" 或 "5.x 功能测试"
+                String parentNumber = placeholder.parentNumber; // 如 "5" 或 "5.3"
+                String placeholderText = placeholder.text; // 如 "5.x" 或 "5.3.x 功能测试"
                 
-                // 在Excel中查找所有匹配的子模块（如5.1、5.2、5.3）
+                // 在Excel中查找所有匹配的直接子模块（使用通用方法）
                 List<String> matchedModules = new java.util.ArrayList<>();
                 for (String moduleNumber : moduleDataMap.keySet()) {
-                    if (moduleNumber.startsWith(parentNumber + ".") && 
-                        !moduleNumber.equals(parentNumber + ".x") &&
-                        moduleNumber.matches("^" + parentNumber + "\\.\\d+$")) {
+                    // 使用通用方法判断是否是直接子节点
+                    if (isDirectChild(parentNumber, moduleNumber)) {
                         matchedModules.add(moduleNumber);
                     }
                 }
                 
-                // 按编号排序
-                matchedModules.sort((a, b) -> {
-                    double numA = Double.parseDouble(a);
-                    double numB = Double.parseDouble(b);
-                    return Double.compare(numA, numB);
-                });
+                // 按编号排序（支持任意层级）
+                matchedModules.sort(WordProcessor::compareSectionNumbers);
                 
                 if (matchedModules.isEmpty()) {
                     System.out.println("占位符 " + placeholderText + " 在Excel中未找到匹配的子模块");
@@ -510,7 +682,7 @@ public class WordProcessor {
     }
     
     /**
-     * 扫描Word文档中已存在的子章节（如5.3.1、5.3.2等）
+     * 扫描Word文档中已存在的子章节（任意层级，如5.3.1、5.3.2、5.3.1.1等）
      * 从目录读取子章节编号，然后在正文中查找对应段落
      *
      * @param document Word文档
@@ -520,26 +692,10 @@ public class WordProcessor {
         List<SubSectionInfo> subSections = new java.util.ArrayList<>();
         List<XWPFParagraph> paragraphs = document.getParagraphs();
         
-        // 目录样式 ID
-        java.util.Set<String> tocStyles = new java.util.HashSet<>();
-        tocStyles.add("22");
-        tocStyles.add("25");
-        tocStyles.add("16");
-        
-        // 正文标题样式 ID: 2=Heading1, 3=Heading2, 4=Heading3, 5=Heading4
-        java.util.Set<String> headingStyles = new java.util.HashSet<>();
-        headingStyles.add("2");  // Heading 1
-        headingStyles.add("3");  // Heading 2
-        headingStyles.add("4");  // Heading 3 (子章节 X.X.X)
-        headingStyles.add("5");  // Heading 4
-        
         // 存储目录中的子章节: 编号 -> 名称
         java.util.Map<String, String> tocSubSections = new java.util.LinkedHashMap<>();
         
-        // 子章节匹配模式：X.X.X 模块名称
-        Pattern subSectionPattern = Pattern.compile("^(\\d+\\.\\d+\\.\\d+)\\s+(.+)$");
-        
-        // 第一遍：从目录中读取子章节编号和名称
+        // 第一遍：从目录中读取子章节编号和名称（使用通用模式匹配任意层级）
         for (XWPFParagraph para : paragraphs) {
             try {
                 String text = para.getText();
@@ -548,17 +704,18 @@ public class WordProcessor {
                 }
 
                 String styleName = para.getStyle();
-                boolean isToc = styleName != null && 
-                    (tocStyles.contains(styleName) || styleName.toLowerCase().startsWith("toc"));
-                
-                if (!isToc) {
+                if (!isTocStyle(styleName)) {
                     continue;
                 }
 
-                // 匹配子章节格式：X.X.X 模块名称
-                Matcher matcher = subSectionPattern.matcher(text.trim());
+                // 使用通用模式匹配任意层级的章节编号
+                Matcher matcher = SECTION_NUMBER_PATTERN.matcher(text.trim());
                 if (matcher.matches()) {
                     String sectionNumber = matcher.group(1);
+                    // 只处理层级大于2的子章节（如 X.X.X 或更深层级）
+                    if (getSectionLevel(sectionNumber) <= 2) {
+                        continue;
+                    }
                     String sectionName = matcher.group(2).trim();
                     // 去除页码
                     int tabIndex = sectionName.indexOf('\t');
@@ -587,22 +744,13 @@ public class WordProcessor {
                     String styleName = para.getStyle();
                     
                     // 跳过目录项
-                    boolean isToc = styleName != null && 
-                        (tocStyles.contains(styleName) || styleName.toLowerCase().startsWith("toc"));
-                    if (isToc) {
+                    if (isTocStyle(styleName)) {
                         continue;
                     }
                     
-                    // 只在标题样式中查找
-                    boolean isHeading = styleName != null && 
-                        (headingStyles.contains(styleName) || 
-                         styleName.toLowerCase().contains("heading") ||
-                         styleName.contains("标题") ||
-                         styleName.contains("程序标题"));
-                    
                     String trimmed = text.trim();
                     // 匹配带编号或仅名称
-                    if ((trimmed.startsWith(subNumber + " ") || trimmed.equals(subName)) && isHeading) {
+                    if ((trimmed.startsWith(subNumber + " ") || trimmed.equals(subName)) && isHeadingStyle(styleName)) {
                         subSections.add(new SubSectionInfo(subNumber, para));
                         System.out.println("找到正文中的子章节: " + subNumber + " -> " + trimmed);
                         break;
@@ -625,12 +773,8 @@ public class WordProcessor {
             paragraph.removeRun(0);
         }
         
-        // 关键：显式设置 numId=0 来禁用从样式继承的编号
-        CTP ctp = paragraph.getCTP();
-        CTPPr ppr = ctp.isSetPPr() ? ctp.getPPr() : ctp.addNewPPr();
-        CTNumPr numPr = ppr.isSetNumPr() ? ppr.getNumPr() : ppr.addNewNumPr();
-        CTDecimalNumber numId = numPr.isSetNumId() ? numPr.getNumId() : numPr.addNewNumId();
-        numId.setVal(BigInteger.ZERO);  // numId=0 表示不使用编号
+        // 禁用从样式继承的编号
+        disableParagraphNumbering(paragraph.getCTP());
         
         // 使用模板格式或默认格式
         SubSectionFormat subFmt = templateSubSectionFormat != null ? templateSubSectionFormat : new SubSectionFormat();
@@ -641,32 +785,20 @@ public class WordProcessor {
             String number = newText.substring(0, spaceIndex + 1);  // 包含空格
             String content = newText.substring(spaceIndex + 1);
             
-            // 编号部分（使用模板格式）
+            // 编号部分
             XWPFRun numRun = paragraph.createRun();
             numRun.setText(number);
-            numRun.setFontFamily(subFmt.numberFormat.fontFamily);
-            numRun.setFontSize(subFmt.numberFormat.fontSize);
-            if (subFmt.numberFormat.bold != null) {
-                numRun.setBold(subFmt.numberFormat.bold);
-            }
+            applyRunFormat(numRun, subFmt.numberFormat);
             
-            // 内容部分（使用模板格式）
+            // 内容部分
             XWPFRun contentRun = paragraph.createRun();
             contentRun.setText(content);
-            contentRun.setFontFamily(subFmt.contentFormat.fontFamily);
-            contentRun.setFontSize(subFmt.contentFormat.fontSize);
-            if (subFmt.contentFormat.bold != null) {
-                contentRun.setBold(subFmt.contentFormat.bold);
-            }
+            applyRunFormat(contentRun, subFmt.contentFormat);
         } else {
             // 没有空格，整体使用内容格式
             XWPFRun run = paragraph.createRun();
             run.setText(newText);
-            run.setFontFamily(subFmt.contentFormat.fontFamily);
-            run.setFontSize(subFmt.contentFormat.fontSize);
-            if (subFmt.contentFormat.bold != null) {
-                run.setBold(subFmt.contentFormat.bold);
-            }
+            applyRunFormat(run, subFmt.contentFormat);
         }
     }
     
@@ -682,14 +814,10 @@ public class WordProcessor {
         // 使用模板格式或默认格式
         CaptionFormat captionFmt = templateCaptionFormat != null ? templateCaptionFormat : new CaptionFormat();
         
-        // 添加新文本（使用模板格式）
+        // 添加新文本
         XWPFRun run = paragraph.createRun();
         run.setText(newText);
-        run.setFontFamily(captionFmt.format.fontFamily);
-        run.setFontSize(captionFmt.format.fontSize);
-        if (captionFmt.format.bold != null) {
-            run.setBold(captionFmt.format.bold);
-        }
+        applyRunFormat(run, captionFmt.format);
     }
     
     /**
@@ -700,15 +828,7 @@ public class WordProcessor {
                                      String subSectionNumber, String testName) {
         List<XWPFParagraph> paragraphs = document.getParagraphs();
         
-        // 找到子章节在列表中的位置
-        int subSectionIndex = -1;
-        for (int i = 0; i < paragraphs.size(); i++) {
-            if (paragraphs.get(i).getCTP() == subSectionPara.getCTP()) {
-                subSectionIndex = i;
-                break;
-            }
-        }
-        
+        int subSectionIndex = findParagraphIndex(paragraphs, subSectionPara);
         if (subSectionIndex == -1) {
             return;
         }
@@ -718,23 +838,17 @@ public class WordProcessor {
             XWPFParagraph para = paragraphs.get(i);
             String styleName = para.getStyle();
             
-            // 检查是否是Caption样式 (style_id="11")
-            if (styleName != null && (styleName.equalsIgnoreCase("Caption") || 
-                styleName.equals("11") || styleName.contains("题注"))) {
-                // 更新Caption文本（黑体，不加粗）
+            if (isCaptionStyle(styleName)) {
                 String newCaption = "表" + subSectionNumber + " " + testName + "测试";
                 updateCaptionText(para, newCaption);
                 System.out.println("更新表格标题为: " + newCaption);
                 break;
             }
             
-            // 如果遇到表格或其他Heading，停止查找
+            // 如果遇到Heading样式，停止查找
             String text = para.getText();
-            if (text != null && !text.trim().isEmpty()) {
-                if (styleName != null && (styleName.equals("3") || styleName.equals("4") || 
-                    styleName.toLowerCase().contains("heading"))) {
-                    break;
-                }
+            if (text != null && !text.trim().isEmpty() && isHeadingStyle(styleName)) {
+                break;
             }
         }
     }
@@ -890,14 +1004,7 @@ public class WordProcessor {
     private XWPFParagraph findCaptionAfterSubSection(XWPFDocument document, XWPFParagraph subSectionPara) {
         List<XWPFParagraph> paragraphs = document.getParagraphs();
         
-        int subIndex = -1;
-        for (int i = 0; i < paragraphs.size(); i++) {
-            if (paragraphs.get(i).getCTP() == subSectionPara.getCTP()) {
-                subIndex = i;
-                break;
-            }
-        }
-        
+        int subIndex = findParagraphIndex(paragraphs, subSectionPara);
         if (subIndex == -1) {
             return null;
         }
@@ -909,16 +1016,18 @@ public class WordProcessor {
             String text = para.getText();
             
             // Caption样式或以"表"开头的文本
-            if (styleName != null && (styleName.equalsIgnoreCase("Caption") ||
-                styleName.equals("11") || styleName.contains("题注"))) {
-                return para;
-            }
-            if (text != null && text.trim().startsWith("表")) {
+            if (isCaptionStyle(styleName) || (text != null && text.trim().startsWith("表"))) {
                 return para;
             }
         }
         
         return null;
+    }
+    
+    /** 判断是否为Caption样式 */
+    private static boolean isCaptionStyle(String styleName) {
+        return styleName != null && (styleName.equalsIgnoreCase("Caption") ||
+            styleName.equals("11") || styleName.contains("题注"));
     }
 
     /**
@@ -927,17 +1036,8 @@ public class WordProcessor {
     private XWPFParagraph createTableCaption(XWPFDocument document, XWPFParagraph afterPara,
                                               String subSectionNumber, String testName) {
         CTBody body = document.getDocument().getBody();
-        CTP afterCTP = afterPara.getCTP();
         
-        // 找到afterPara在body中的位置
-        int afterIndex = -1;
-        for (int i = 0; i < body.sizeOfPArray(); i++) {
-            if (body.getPArray(i) == afterCTP) {
-                afterIndex = i;
-                break;
-            }
-        }
-        
+        int afterIndex = findParagraphIndexInBody(body, afterPara.getCTP());
         if (afterIndex == -1) {
             afterIndex = body.sizeOfPArray() - 1;
         }
@@ -956,15 +1056,11 @@ public class WordProcessor {
             // 忽略样式设置失败
         }
         
-        // 设置Caption内容（使用模板格式）
+        // 设置Caption内容
         String captionText = "表" + subSectionNumber + " " + testName + "测试";
         XWPFRun run = para.createRun();
         run.setText(captionText);
-        run.setFontFamily(captionFmt.format.fontFamily);
-        run.setFontSize(captionFmt.format.fontSize);
-        if (captionFmt.format.bold != null) {
-            run.setBold(captionFmt.format.bold);
-        }
+        applyRunFormat(run, captionFmt.format);
         
         // 设置居中对齐
         para.setAlignment(ParagraphAlignment.CENTER);
@@ -1014,92 +1110,20 @@ public class WordProcessor {
      */
     private XWPFParagraph createSubSectionParagraph(XWPFDocument document, XWPFParagraph afterPara, 
                                                      String moduleNumber, String testName) {
-        CTBody body = document.getDocument().getBody();
-        CTP afterCTP = afterPara.getCTP();
-        
-        // 找到afterPara在body中的位置
-        int afterIndex = -1;
-        for (int i = 0; i < body.sizeOfPArray(); i++) {
-            if (body.getPArray(i) == afterCTP) {
-                afterIndex = i;
-                break;
-            }
-        }
-        
-        if (afterIndex == -1) {
-            System.err.println("找不到插入点段落，使用末尾插入");
-            afterIndex = body.sizeOfPArray() - 1;
-        }
-        
-        // 在afterIndex+1位置插入新段落（子章节标题）
-        CTP ctp = body.insertNewP(afterIndex + 1);
-        XWPFParagraph para = new XWPFParagraph(ctp, document);
-
-        // 使用模板格式或默认格式
-        SubSectionFormat subFmt = templateSubSectionFormat != null ? templateSubSectionFormat : new SubSectionFormat();
-        
-        // 设置样式
-        try {
-            para.setStyle(subFmt.styleId);
-        } catch (Exception e) {
-            // 忽略样式设置失败
-        }
-        
-        // 关键：显式设置 numId=0 来禁用从样式继承的编号
-        // 这是因为 Heading 3 样式定义中包含 numPr
-        CTPPr ppr = ctp.isSetPPr() ? ctp.getPPr() : ctp.addNewPPr();
-        CTNumPr numPr = ppr.isSetNumPr() ? ppr.getNumPr() : ppr.addNewNumPr();
-        CTDecimalNumber numId = numPr.isSetNumId() ? numPr.getNumId() : numPr.addNewNumId();
-        numId.setVal(BigInteger.ZERO);  // numId=0 表示不使用编号
-        
-        // 设置标题内容（使用模板格式）
-        String subTitle = moduleNumber + " " + testName + "测试";
-        // 编号部分
-        XWPFRun numRun = para.createRun();
-        numRun.setText(moduleNumber + " ");
-        numRun.setFontFamily(subFmt.numberFormat.fontFamily);
-        numRun.setFontSize(subFmt.numberFormat.fontSize);
-        if (subFmt.numberFormat.bold != null) {
-            numRun.setBold(subFmt.numberFormat.bold);
-        }
-        
-        // 内容部分
-        XWPFRun contentRun = para.createRun();
-        contentRun.setText(testName + "测试");
-        contentRun.setFontFamily(subFmt.contentFormat.fontFamily);
-        contentRun.setFontSize(subFmt.contentFormat.fontSize);
-        if (subFmt.contentFormat.bold != null) {
-            contentRun.setBold(subFmt.contentFormat.bold);
-        }
-
-        // 设置段落格式
-        para.setAlignment(ParagraphAlignment.LEFT);
-        CTSpacing spacing = ppr.isSetSpacing() ? ppr.getSpacing() : ppr.addNewSpacing();
-        spacing.setAfter(BigInteger.valueOf(120)); // 段后间距
-        
-        System.out.println("在位置 " + (afterIndex + 1) + " 插入子章节: " + subTitle);
-        
-        return para;
+        return createSubSectionParagraphBeforeBoundary(document, afterPara, moduleNumber, testName, -1);
     }
     
     /**
      * 创建子章节标题段落（带边界检查）
      * 确保插入位置不超过指定的边界
+     * 
+     * @param boundaryIndex 边界索引，-1表示不检查边界
      */
     private XWPFParagraph createSubSectionParagraphBeforeBoundary(XWPFDocument document, XWPFParagraph afterPara, 
                                                      String moduleNumber, String testName, int boundaryIndex) {
         CTBody body = document.getDocument().getBody();
-        CTP afterCTP = afterPara.getCTP();
         
-        // 找到afterPara在body中的位置
-        int afterIndex = -1;
-        for (int i = 0; i < body.sizeOfPArray(); i++) {
-            if (body.getPArray(i) == afterCTP) {
-                afterIndex = i;
-                break;
-            }
-        }
-        
+        int afterIndex = findParagraphIndexInBody(body, afterPara.getCTP());
         if (afterIndex == -1) {
             System.err.println("找不到插入点段落，使用末尾插入");
             afterIndex = body.sizeOfPArray() - 1;
@@ -1128,34 +1152,25 @@ public class WordProcessor {
             // 忽略样式设置失败
         }
         
-        // 关键：显式设置 numId=0 来禁用从样式继承的编号
-        CTPPr ppr = ctp.isSetPPr() ? ctp.getPPr() : ctp.addNewPPr();
-        CTNumPr numPr = ppr.isSetNumPr() ? ppr.getNumPr() : ppr.addNewNumPr();
-        CTDecimalNumber numId = numPr.isSetNumId() ? numPr.getNumId() : numPr.addNewNumId();
-        numId.setVal(BigInteger.ZERO);
+        // 禁用从样式继承的编号
+        disableParagraphNumbering(ctp);
         
         // 设置标题内容（使用模板格式）
         String subTitle = moduleNumber + " " + testName + "测试";
+        
         // 编号部分
         XWPFRun numRun = para.createRun();
         numRun.setText(moduleNumber + " ");
-        numRun.setFontFamily(subFmt.numberFormat.fontFamily);
-        numRun.setFontSize(subFmt.numberFormat.fontSize);
-        if (subFmt.numberFormat.bold != null) {
-            numRun.setBold(subFmt.numberFormat.bold);
-        }
+        applyRunFormat(numRun, subFmt.numberFormat);
         
         // 内容部分
         XWPFRun contentRun = para.createRun();
         contentRun.setText(testName + "测试");
-        contentRun.setFontFamily(subFmt.contentFormat.fontFamily);
-        contentRun.setFontSize(subFmt.contentFormat.fontSize);
-        if (subFmt.contentFormat.bold != null) {
-            contentRun.setBold(subFmt.contentFormat.bold);
-        }
+        applyRunFormat(contentRun, subFmt.contentFormat);
 
         // 设置段落格式
         para.setAlignment(ParagraphAlignment.LEFT);
+        CTPPr ppr = ctp.isSetPPr() ? ctp.getPPr() : ctp.addNewPPr();
         CTSpacing spacing = ppr.isSetSpacing() ? ppr.getSpacing() : ppr.addNewSpacing();
         spacing.setAfter(BigInteger.valueOf(120));
         
@@ -1165,18 +1180,28 @@ public class WordProcessor {
     }
 
     /**
-     * 扫描Word文档中的所有章节编号
+     * 扫描Word文档中的所有章节编号（支持任意层级）
      * 从目录（TOC）中读取章节编号（因为正文中的章节标题可能没有编号）
      *
      * @param document Word文档
-     * @return 章节编号列表，如 ["4.3", "5.3", "6.2"]
+     * @return 章节编号列表，如 ["4.3", "5.3", "6.2", "6.2.1"]
      */
     private List<String> scanWordSections(XWPFDocument document) {
+        return scanWordSections(document, 0); // 0表示不限制层级
+    }
+    
+    /**
+     * 扫描Word文档中指定层级的章节编号
+     * 
+     * @param document Word文档
+     * @param maxLevel 最大层级（0表示不限制）
+     * @return 章节编号列表
+     */
+    private List<String> scanWordSections(XWPFDocument document, int maxLevel) {
         List<String> sectionNumbers = new java.util.ArrayList<>();
         List<XWPFParagraph> paragraphs = document.getParagraphs();
         
-        // 只从目录项（样式 ID 22, 25, 16 等）中读取章节编号
-        // 同时建立章节编号到章节名称的映射
+        // 从目录项中读取章节编号
         for (XWPFParagraph para : paragraphs) {
             try {
                 String text = para.getText();
@@ -1187,23 +1212,21 @@ public class WordProcessor {
 
                 String styleName = para.getStyle();
                 
-                // 目录样式 ID: 22=toc1, 25=toc2, 16=toc3
-                boolean isToc = styleName != null && 
-                    (styleName.equals("22") || styleName.equals("25") || styleName.equals("16") ||
-                     styleName.toLowerCase().startsWith("toc"));
-                
-                if (!isToc) {
+                if (!isTocStyle(styleName)) {
                     continue;
                 }
                 
                 String trimmed = text.trim();
 
-                // 匹配章节标题格式：X.X 模块名称
-                Matcher matcher = SECTION_PATTERN.matcher(trimmed);
+                // 使用通用模式匹配任意层级的章节标题
+                Matcher matcher = SECTION_NUMBER_PATTERN.matcher(trimmed);
                 if (matcher.matches()) {
                     String sectionNumber = matcher.group(1);
-                    // 只添加主章节（X.X格式），不添加子章节（X.X.X格式）
-                    if (sectionNumber.matches("^\\d+\\.\\d+$")) {
+                    int level = getSectionLevel(sectionNumber);
+                    
+                    // 如果指定了最大层级，则只添加不超过该层级的章节
+                    // 对于主章节扫描，我们需要层级为2的章节（如 X.X）
+                    if (maxLevel == 0 || level <= maxLevel) {
                         if (!sectionNumbers.contains(sectionNumber)) {
                             sectionNumbers.add(sectionNumber);
                         }
@@ -1231,19 +1254,6 @@ public class WordProcessor {
         List<XWPFParagraph> paragraphs = document.getParagraphs();
         String sectionNameFromToc = null;  // 从目录中提取的章节名称
         
-        // 目录样式 ID: 22=toc1, 25=toc2, 16=toc3
-        java.util.Set<String> tocStyles = new java.util.HashSet<>();
-        tocStyles.add("22");
-        tocStyles.add("25");
-        tocStyles.add("16");
-        
-        // 正文标题样式 ID: 2=Heading1, 3=Heading2, 4=Heading3, 5=Heading4
-        java.util.Set<String> headingStyles = new java.util.HashSet<>();
-        headingStyles.add("2");  // Heading 1
-        headingStyles.add("3");  // Heading 2 (主章节 X.X)
-        headingStyles.add("4");  // Heading 3 (子章节 X.X.X)
-        headingStyles.add("5");  // Heading 4
-        
         // 第一遍：从目录中提取章节名称
         for (XWPFParagraph para : paragraphs) {
             try {
@@ -1253,24 +1263,23 @@ public class WordProcessor {
                 }
 
                 String styleName = para.getStyle();
-                boolean isToc = styleName != null && 
-                    (tocStyles.contains(styleName) || styleName.toLowerCase().startsWith("toc"));
+                if (!isTocStyle(styleName)) {
+                    continue;
+                }
                 
-                if (isToc) {
-                    String trimmedText = text.trim();
-                    Matcher matcher = SECTION_PATTERN.matcher(trimmedText);
-                    if (matcher.matches()) {
-                        String foundModuleNumber = matcher.group(1);
-                        if (moduleNumber.equals(foundModuleNumber)) {
-                            sectionNameFromToc = matcher.group(2).trim();
-                            // 去除页码（通常以\t分隔）
-                            int tabIndex = sectionNameFromToc.indexOf('\t');
-                            if (tabIndex > 0) {
-                                sectionNameFromToc = sectionNameFromToc.substring(0, tabIndex).trim();
-                            }
-                            System.out.println("从目录提取章节名称: " + moduleNumber + " -> " + sectionNameFromToc);
-                            break;
+                String trimmedText = text.trim();
+                Matcher matcher = SECTION_PATTERN.matcher(trimmedText);
+                if (matcher.matches()) {
+                    String foundModuleNumber = matcher.group(1);
+                    if (moduleNumber.equals(foundModuleNumber)) {
+                        sectionNameFromToc = matcher.group(2).trim();
+                        // 去除页码（通常以\t分隔）
+                        int tabIndex = sectionNameFromToc.indexOf('\t');
+                        if (tabIndex > 0) {
+                            sectionNameFromToc = sectionNameFromToc.substring(0, tabIndex).trim();
                         }
+                        System.out.println("从目录提取章节名称: " + moduleNumber + " -> " + sectionNameFromToc);
+                        break;
                     }
                 }
             } catch (Exception e) {
@@ -1289,16 +1298,9 @@ public class WordProcessor {
                 String styleName = para.getStyle();
                 
                 // 跳过目录项
-                if (styleName != null && 
-                    (tocStyles.contains(styleName) || styleName.toLowerCase().startsWith("toc"))) {
+                if (isTocStyle(styleName)) {
                     continue;
                 }
-                
-                // 只在正文标题样式中查找
-                boolean isHeading = styleName != null && 
-                    (headingStyles.contains(styleName) || 
-                     styleName.toLowerCase().contains("heading") || 
-                     styleName.contains("标题"));
                 
                 String trimmedText = text.trim();
                 
@@ -1313,7 +1315,7 @@ public class WordProcessor {
                 }
                 
                 // 方法2：通过章节名称 + Heading样式匹配
-                if (sectionNameFromToc != null && trimmedText.equals(sectionNameFromToc) && isHeading) {
+                if (sectionNameFromToc != null && trimmedText.equals(sectionNameFromToc) && isHeadingStyle(styleName)) {
                     System.out.println("在正文中找到章节(通过名称+样式): " + trimmedText + " [" + styleName + "]");
                     return para;
                 }
@@ -1355,7 +1357,6 @@ public class WordProcessor {
 
             // 1. 创建子标题
             String subSectionNumber = moduleNumber + "." + sequenceNumber;
-            String subTitle = subSectionNumber + " " + testCase.getTestName() + "测试";
             XWPFParagraph subSectionPara = createSubSectionParagraph(
                 document, lastInsertPara, subSectionNumber, testCase.getTestName());
 
@@ -1393,38 +1394,9 @@ public class WordProcessor {
     }
 
     /**
-     * 在指定位置插入子标题
-     * @return 插入的段落CTP对象
-     */
-    private CTP insertSubTitleAt(XWPFDocument document, CTBody body, int position, String title) {
-        // 确保位置不超过P数组长度
-        int maxPos = body.sizeOfPArray();
-        int insertPos = Math.min(position, maxPos);
-        
-        CTP ctp = body.insertNewP(insertPos);
-        XWPFParagraph para = new XWPFParagraph(ctp, document);
-
-        // 设置标题样式：小四、加粗
-        XWPFRun run = para.createRun();
-        run.setText(title);
-        run.setBold(true);
-        run.setFontSize(12); // 小四号字体
-
-        // 设置段落格式
-        para.setAlignment(ParagraphAlignment.LEFT);
-        CTPPr ppr = ctp.isSetPPr() ? ctp.getPPr() : ctp.addNewPPr();
-        CTSpacing spacing = ppr.isSetSpacing() ? ppr.getSpacing() : ppr.addNewSpacing();
-        spacing.setAfter(BigInteger.valueOf(120)); // 段后间距
-        
-        return ctp;
-    }
-
-    /**
      * 在段落后强制创建新表格（不查找已存在的表格）
      */
     private void insertNewTableAfterParagraph(XWPFDocument document, CTP paragraph, TestCase testCase) {
-        CTBody body = document.getDocument().getBody();
-        
         // 使用XmlCursor在段落后直接插入表格元素
         org.apache.xmlbeans.XmlCursor paraCursor = paragraph.newCursor();
         paraCursor.toEndToken();
@@ -1693,15 +1665,7 @@ public class WordProcessor {
      * 只查找紧邻段落的表格，不查找距离较远的表格
      */
     private CTTbl findTableCttblAfterParagraph(CTBody body, CTP paragraph) {
-        // 找到段落在body中的位置
-        int pIndex = -1;
-        for (int i = 0; i < body.sizeOfPArray(); i++) {
-            if (body.getPArray(i) == paragraph) {
-                pIndex = i;
-                break;
-            }
-        }
-        
+        int pIndex = findParagraphIndexInBody(body, paragraph);
         if (pIndex == -1) {
             return null;
         }
@@ -1710,10 +1674,13 @@ public class WordProcessor {
         try {
             XWPFParagraph para = new XWPFParagraph(paragraph, null);
             String paraText = para.getText();
-            // 如果段落是子章节标题（如"4.3.2 注册功能测试"），且是新创建的，后面不应该有表格
-            if (paraText != null && paraText.trim().matches("^\\d+\\.\\d+\\.\\d+\\s+.*")) {
-                // 这是子章节，检查是否是刚创建的（通过检查后面是否有表格）
-                // 如果是新创建的子章节，后面不应该有表格，应该返回null
+            // 如果段落是子章节标题（任意层级，如"4.3.2 注册功能测试"），且是新创建的，后面不应该有表格
+            if (paraText != null) {
+                Matcher matcher = SECTION_NUMBER_PATTERN.matcher(paraText.trim());
+                if (matcher.matches() && getSectionLevel(matcher.group(1)) > 2) {
+                    // 这是子章节（层级>2），检查是否是刚创建的
+                    // 如果是新创建的子章节，后面不应该有表格，应该返回null
+                }
             }
         } catch (Exception e) {
             // 忽略异常
@@ -1831,64 +1798,11 @@ public class WordProcessor {
     }
     
     /**
-     * 查找段落后的表格
-     */
-    private XWPFTable findTableAfterParagraph(CTBody body, CTP paragraph) {
-        // 找到段落在body中的位置
-        int pIndex = -1;
-        for (int i = 0; i < body.sizeOfPArray(); i++) {
-            if (body.getPArray(i) == paragraph) {
-                pIndex = i;
-                break;
-            }
-        }
-        
-        if (pIndex == -1) {
-            return null;
-        }
-        
-        // 检查段落后是否有表格
-        // 使用 XML cursor 检查下一个元素
-        org.apache.xmlbeans.XmlCursor cursor = paragraph.newCursor();
-        cursor.toEndToken();
-        
-        // 移动到下一个兄弟元素
-        if (cursor.toNextSibling()) {
-            org.apache.xmlbeans.XmlObject obj = cursor.getObject();
-            cursor.close();
-            
-            // 检查是否是表格
-            if (obj instanceof CTTbl) {
-                CTTbl cttbl = (CTTbl) obj;
-                // 在 body 的表格数组中查找这个表格
-                for (int i = 0; i < body.sizeOfTblArray(); i++) {
-                    if (body.getTblArray(i) == cttbl) {
-                        // 找到了，需要创建 XWPFTable 对象
-                        // 由于我们需要 document 引用，我们需要从 document 中查找
-                        return null; // 返回 null，让调用者知道找到了表格但需要特殊处理
-                    }
-                }
-            }
-        } else {
-            cursor.close();
-        }
-        
-        return null;
-    }
-    
-    /**
      * 找到下一个主章节（用于确定当前章节的边界）
      * 例如：当前章节是 5.5，则找到 5.6 或 6.1 等
      */
     private XWPFParagraph findNextMainSection(XWPFDocument document, XWPFParagraph currentSectionPara, String currentSectionNumber) {
         List<XWPFParagraph> paragraphs = document.getParagraphs();
-        
-        // 目录样式 ID
-        java.util.Set<String> tocStyles = new java.util.HashSet<>();
-        tocStyles.add("22");
-        tocStyles.add("25");
-        tocStyles.add("16");
-        
         boolean foundCurrent = false;
         
         for (XWPFParagraph para : paragraphs) {
@@ -1906,16 +1820,12 @@ public class WordProcessor {
             String styleId = para.getStyle();
             
             // 跳过目录项
-            if (styleId != null && (tocStyles.contains(styleId) || 
-                styleId.toLowerCase().startsWith("toc"))) {
+            if (isTocStyle(styleId)) {
                 continue;
             }
             
             // 检查是否是 Heading 2（主章节样式）
-            boolean isHeading2 = styleId != null && 
-                (styleId.equals("3") || styleId.toLowerCase().contains("heading 2"));
-            
-            if (isHeading2) {
+            if (isHeading2Style(styleId)) {
                 // 这是下一个主章节
                 System.out.println("找到下一个主章节: " + text.trim());
                 return para;
@@ -1933,21 +1843,7 @@ public class WordProcessor {
     private XWPFParagraph findLastElementInSection(XWPFDocument document, XWPFParagraph sectionPara, String sectionNumber) {
         List<XWPFParagraph> paragraphs = document.getParagraphs();
         
-        // 目录样式 ID
-        java.util.Set<String> tocStyles = new java.util.HashSet<>();
-        tocStyles.add("22");
-        tocStyles.add("25");
-        tocStyles.add("16");
-        
-        // 找到章节段落在列表中的位置
-        int sectionIndex = -1;
-        for (int i = 0; i < paragraphs.size(); i++) {
-            if (paragraphs.get(i).getCTP() == sectionPara.getCTP()) {
-                sectionIndex = i;
-                break;
-            }
-        }
-        
+        int sectionIndex = findParagraphIndex(paragraphs, sectionPara);
         if (sectionIndex == -1) {
             return sectionPara;
         }
@@ -1965,31 +1861,16 @@ public class WordProcessor {
             }
             
             // 跳过目录项
-            boolean isToc = styleName != null && 
-                (tocStyles.contains(styleName) || styleName.toLowerCase().startsWith("toc"));
-            if (isToc) {
+            if (isTocStyle(styleName)) {
                 continue;
             }
             
             // 通过样式识别章节边界
-            if (styleName != null) {
-                // 样式 "2" = Heading 1 (一级标题) -> 遇到一级标题，停止
-                // 样式 "3" = Heading 2 (二级标题/主章节) -> 遇到下一个主章节，停止
-                if (styleName.equals("2") || styleName.equals("3") || 
-                    styleName.toLowerCase().contains("heading 1") ||
-                    styleName.toLowerCase().contains("heading 2") ||
-                    styleName.contains("标题 1") || styleName.contains("标题 2")) {
-                    break;
-                }
-                // 样式 "4" = Heading 3 (三级标题/子章节) -> 记录为 lastSubSection
-                // 也包括 "程序标题 3" 等变体
-                if (styleName.equals("4") || styleName.equals("5") ||
-                    styleName.toLowerCase().contains("heading 3") || 
-                    styleName.toLowerCase().contains("heading 4") ||
-                    styleName.contains("标题 3") || styleName.contains("程序标题")) {
-                    lastSubSection = para;
-                    continue;
-                }
+            if (isMainSectionStyle(styleName)) {
+                break;
+            }
+            if (isSubSectionStyle(styleName)) {
+                lastSubSection = para;
             }
         }
         
@@ -2007,21 +1888,7 @@ public class WordProcessor {
         List<XWPFParagraph> subSections = new java.util.ArrayList<>();
         List<XWPFParagraph> paragraphs = document.getParagraphs();
         
-        // 目录样式 ID
-        java.util.Set<String> tocStyles = new java.util.HashSet<>();
-        tocStyles.add("22");
-        tocStyles.add("25");
-        tocStyles.add("16");
-        
-        // 找到章节段落在列表中的位置
-        int sectionIndex = -1;
-        for (int i = 0; i < paragraphs.size(); i++) {
-            if (paragraphs.get(i).getCTP() == sectionPara.getCTP()) {
-                sectionIndex = i;
-                break;
-            }
-        }
-        
+        int sectionIndex = findParagraphIndex(paragraphs, sectionPara);
         if (sectionIndex == -1) {
             return subSections;
         }
@@ -2037,27 +1904,17 @@ public class WordProcessor {
             }
             
             // 跳过目录项
-            boolean isToc = styleName != null && 
-                (tocStyles.contains(styleName) || styleName.toLowerCase().startsWith("toc"));
-            if (isToc) {
+            if (isTocStyle(styleName)) {
                 continue;
             }
             
-            // 检查是否是主章节（Heading 2），如果是则停止
-            if (styleName != null) {
-                if (styleName.equals("2") || styleName.equals("3") || 
-                    styleName.toLowerCase().contains("heading 1") ||
-                    styleName.toLowerCase().contains("heading 2") ||
-                    styleName.contains("标题 1") || styleName.contains("标题 2")) {
-                    break;
-                }
-                // 子章节样式（Heading 3/4）
-                if (styleName.equals("4") || styleName.equals("5") ||
-                    styleName.toLowerCase().contains("heading 3") || 
-                    styleName.toLowerCase().contains("heading 4") ||
-                    styleName.contains("标题 3") || styleName.contains("程序标题")) {
-                    subSections.add(para);
-                }
+            // 检查是否是主章节，如果是则停止
+            if (isMainSectionStyle(styleName)) {
+                break;
+            }
+            // 子章节样式
+            if (isSubSectionStyle(styleName)) {
+                subSections.add(para);
             }
         }
         
@@ -2167,7 +2024,6 @@ public class WordProcessor {
      * 填充2列格式的表格（左列标签，右列数据）
      */
     private void fillTwoColumnTable(XWPFTable table, TestCase testCase) {
-        // 获取Excel中所有可用的列名
         Map<String, String> columnData = testCase.getColumnData();
         
         int rowCount = table.getNumberOfRows();
@@ -2177,75 +2033,50 @@ public class WordProcessor {
         
         XWPFTableRow firstRow = table.getRow(0);
         int firstRowCellCount = firstRow != null ? firstRow.getTableCells().size() : 0;
+        int startRow = 0;
         
-        // 如果第一行是4列格式，特殊处理
+        // 如果第一行是4列格式，特殊处理第一行
         if (firstRowCellCount == 4) {
-            // 填充第一行的4列数据
-            String firstCol = getCellText(firstRow.getCell(0)).trim();
-            String thirdCol = getCellText(firstRow.getCell(2)).trim();
-            
-            // 在Excel列名中查找匹配的列
-            String firstColMatch = findMatchingColumn(firstCol, columnData.keySet());
-            if (firstColMatch != null) {
-                setCellValue(firstRow.getCell(1), testCase.getColumnValue(firstColMatch));
+            fillFourColumnFirstRow(firstRow, testCase, columnData.keySet());
+            startRow = 1;
+        }
+        
+        // 处理数据行
+        for (int i = startRow; i < rowCount; i++) {
+            XWPFTableRow row = table.getRow(i);
+            if (row == null || row.getTableCells().size() < 2) {
+                continue;
             }
-            
-            String thirdColMatch = findMatchingColumn(thirdCol, columnData.keySet());
-            if (thirdColMatch != null) {
-                setCellValue(firstRow.getCell(3), testCase.getColumnValue(thirdColMatch));
-            }
-            
-            // 从第2行开始处理2列格式
-            for (int i = 1; i < rowCount; i++) {
-                XWPFTableRow row = table.getRow(i);
-                if (row == null || row.getTableCells().size() < 2) {
-                    continue;
-                }
-                
-                // 读取左列的标签
-                String label = getCellText(row.getCell(0)).trim();
-                
-                // 在Excel列名中查找匹配的列
-                String matchedColumn = findMatchingColumn(label, columnData.keySet());
-                
-                // 如果找到了对应的列，填充数据到右列
-                if (matchedColumn != null) {
-                    String value = testCase.getColumnValue(matchedColumn);
-                    // 注意：由于单元格合并，单元格0-1是一个物理单元格（标签列），单元格2-3是另一个物理单元格（数据列）
-                    // 所以应该填充单元格2，而不是单元格1
-                    if (row.getTableCells().size() >= 3) {
-                        setCellValue(row.getCell(2), value);
-                    } else {
-                        setCellValue(row.getCell(1), value);
-                    }
-                }
-            }
-        } else {
-            // 标准的2列格式，从第1行开始处理
-            for (int i = 0; i < rowCount; i++) {
-                XWPFTableRow row = table.getRow(i);
-                if (row == null || row.getTableCells().size() < 2) {
-                    continue;
-                }
-                
-                // 读取左列的标签
-                String label = getCellText(row.getCell(0)).trim();
-                
-                // 在Excel列名中查找匹配的列
-                String matchedColumn = findMatchingColumn(label, columnData.keySet());
-                
-                // 如果找到了对应的列，填充数据到右列
-                if (matchedColumn != null) {
-                    String value = testCase.getColumnValue(matchedColumn);
-                    // 注意：由于单元格合并，可能单元格0-1是一个物理单元格，单元格2-3是另一个
-                    // 所以应该填充最后一个单元格或单元格2
-                    if (row.getTableCells().size() >= 3) {
-                        setCellValue(row.getCell(2), value);
-                    } else {
-                        setCellValue(row.getCell(1), value);
-                    }
-                }
-            }
+            fillRowByLabel(row, testCase, columnData.keySet());
+        }
+    }
+    
+    /** 填充4列格式的第一行 */
+    private void fillFourColumnFirstRow(XWPFTableRow firstRow, TestCase testCase, java.util.Set<String> columnNames) {
+        String firstCol = getCellText(firstRow.getCell(0)).trim();
+        String thirdCol = getCellText(firstRow.getCell(2)).trim();
+        
+        String firstColMatch = findMatchingColumn(firstCol, columnNames);
+        if (firstColMatch != null) {
+            setCellValue(firstRow.getCell(1), testCase.getColumnValue(firstColMatch));
+        }
+        
+        String thirdColMatch = findMatchingColumn(thirdCol, columnNames);
+        if (thirdColMatch != null) {
+            setCellValue(firstRow.getCell(3), testCase.getColumnValue(thirdColMatch));
+        }
+    }
+    
+    /** 根据标签列填充数据到数据列 */
+    private void fillRowByLabel(XWPFTableRow row, TestCase testCase, java.util.Set<String> columnNames) {
+        String label = getCellText(row.getCell(0)).trim();
+        String matchedColumn = findMatchingColumn(label, columnNames);
+        
+        if (matchedColumn != null) {
+            String value = testCase.getColumnValue(matchedColumn);
+            // 由于单元格合并，优先填充单元格2（如果存在），否则填充单元格1
+            int dataCell = row.getTableCells().size() >= 3 ? 2 : 1;
+            setCellValue(row.getCell(dataCell), value);
         }
     }
     
@@ -2318,28 +2149,10 @@ public class WordProcessor {
             return;
         }
         
-        // 不创建新行，只填充已有的行
-        // 假设表格已经有了正确的结构
-        
-        // 填充表头行（第1行）
+        // 填充表头行（第1行，如果是4列格式）
         XWPFTableRow headerRow = table.getRow(0);
-        if (headerRow != null && headerRow.getTableCells().size() >= 2) {
-            // 第1行：测试项名称 | testName值 | 标识 | id值
-            if (headerRow.getTableCells().size() >= 4) {
-                // 读取第1列和第3列的标签，在Excel中查找匹配的列
-                String firstCol = getCellText(headerRow.getCell(0)).trim();
-                String thirdCol = getCellText(headerRow.getCell(2)).trim();
-                
-                String firstColMatch = findMatchingColumn(firstCol, columnData.keySet());
-                if (firstColMatch != null) {
-                    setCellValue(headerRow.getCell(1), testCase.getColumnValue(firstColMatch));
-                }
-                
-                String thirdColMatch = findMatchingColumn(thirdCol, columnData.keySet());
-                if (thirdColMatch != null) {
-                    setCellValue(headerRow.getCell(3), testCase.getColumnValue(thirdColMatch));
-                }
-            }
+        if (headerRow != null && headerRow.getTableCells().size() >= 4) {
+            fillFourColumnFirstRow(headerRow, testCase, columnData.keySet());
         }
         
         // 填充数据行（第2行及以后）
@@ -2348,21 +2161,7 @@ public class WordProcessor {
             if (row == null || row.getTableCells().size() < 2) {
                 continue;
             }
-            
-            // 读取左列的标签
-            String label = getCellText(row.getCell(0)).trim();
-            
-            // 在Excel列名中查找匹配的列
-            String matchedColumn = findMatchingColumn(label, columnData.keySet());
-            if (matchedColumn != null) {
-                String value = testCase.getColumnValue(matchedColumn);
-                // 填充到右列（考虑单元格合并的情况）
-                if (row.getTableCells().size() >= 3) {
-                    setCellValue(row.getCell(2), value);
-                } else {
-                    setCellValue(row.getCell(1), value);
-                }
-            }
+            fillRowByLabel(row, testCase, columnData.keySet());
         }
     }
     
@@ -2401,139 +2200,6 @@ public class WordProcessor {
         run.setText(value != null ? value : "");
     }
     
-    /**
-     * 设置列宽
-     */
-    private void setColumnWidth(XWPFTable table, int row, int col, int width) {
-        XWPFTableRow tableRow = table.getRow(row);
-        if (tableRow == null) {
-            return;
-        }
-        
-        XWPFTableCell cell = tableRow.getCell(col);
-        if (cell == null) {
-            return;
-        }
-        
-        CTTcPr tcPr = cell.getCTTc().getTcPr();
-        if (tcPr == null) {
-            tcPr = cell.getCTTc().addNewTcPr();
-        }
-        
-        CTTblWidth cellWidth = tcPr.getTcW();
-        if (cellWidth == null) {
-            cellWidth = tcPr.addNewTcW();
-        }
-        cellWidth.setType(STTblWidth.DXA);
-        cellWidth.setW(BigInteger.valueOf(width));
-    }
-    
-    /**
-     * 横向合并单元格 - 使用 hMerge 标准方式并完全隐藏被合并单元格
-     */
-    private void mergeCellsHorizontally(XWPFTable table, int row, int fromCol, int toCol) {
-        XWPFTableRow tableRow = table.getRow(row);
-        if (tableRow == null) {
-            return;
-        }
-        
-        for (int col = fromCol; col <= toCol; col++) {
-            XWPFTableCell cell = tableRow.getCell(col);
-            if (cell == null) {
-                continue;
-            }
-            
-            CTTcPr tcPr = cell.getCTTc().getTcPr();
-            if (tcPr == null) {
-                tcPr = cell.getCTTc().addNewTcPr();
-            }
-            
-            if (col == fromCol) {
-                // 第一个单元格：设置为合并的起始单元格
-                if (!tcPr.isSetHMerge()) {
-                    tcPr.addNewHMerge().setVal(STMerge.RESTART);
-                } else {
-                    tcPr.getHMerge().setVal(STMerge.RESTART);
-                }
-            } else {
-                // 后续单元格：设置为继续合并
-                if (!tcPr.isSetHMerge()) {
-                    tcPr.addNewHMerge().setVal(STMerge.CONTINUE);
-                } else {
-                    tcPr.getHMerge().setVal(STMerge.CONTINUE);
-                }
-                
-                // 设置单元格宽度为0
-                CTTblWidth cellWidth = tcPr.isSetTcW() ? tcPr.getTcW() : tcPr.addNewTcW();
-                cellWidth.setType(STTblWidth.DXA);
-                cellWidth.setW(BigInteger.ZERO);
-                
-                // 完全隐藏边框
-                CTTcBorders borders = tcPr.isSetTcBorders() ? tcPr.getTcBorders() : tcPr.addNewTcBorders();
-                
-                // 创建无边框 - 使用 NONE 而不是 NIL
-                CTBorder noBorder = CTBorder.Factory.newInstance();
-                noBorder.setVal(STBorder.NONE);
-                noBorder.setSz(BigInteger.ZERO);
-                noBorder.setSpace(BigInteger.ZERO);
-                noBorder.setColor("FFFFFF"); // 白色
-                
-                borders.setTop(noBorder);
-                borders.setBottom(noBorder);
-                borders.setLeft(noBorder);
-                borders.setRight(noBorder);
-                borders.setInsideH(noBorder);
-                borders.setInsideV(noBorder);
-                
-                // 设置单元格底纹为白色（完全隐藏）
-                CTShd shd = tcPr.isSetShd() ? tcPr.getShd() : tcPr.addNewShd();
-                shd.setVal(org.openxmlformats.schemas.wordprocessingml.x2006.main.STShd.CLEAR);
-                shd.setColor("auto");
-                shd.setFill("FFFFFF");
-            }
-        }
-    }
-
-
-    /**
-     * 设置单元格值
-     */
-    private void setCellValue(XWPFTable table, int row, int col, String value) {
-        XWPFTableRow tableRow = table.getRow(row);
-        if (tableRow == null) {
-            return;
-        }
-        
-        XWPFTableCell cell = tableRow.getCell(col);
-        if (cell == null) {
-            return;
-        }
-        
-        // 清除原有内容
-        try {
-            // 清除所有段落
-            while (cell.getParagraphs().size() > 0) {
-                cell.removeParagraph(0);
-            }
-        } catch (Exception e) {
-            // 忽略错误
-        }
-        
-        // 只有当值不为空时才添加新段落
-        if (value != null && !value.isEmpty()) {
-            XWPFParagraph para = cell.addParagraph();
-            XWPFRun run = para.createRun();
-            run.setText(value);
-            
-            // 设置单元格对齐方式：垂直居中、左对齐
-            cell.setVerticalAlignment(XWPFTableCell.XWPFVertAlign.CENTER);
-            para.setAlignment(ParagraphAlignment.LEFT);
-            
-            // 设置字体大小：五号
-            run.setFontSize(10);
-        }
-    }
-
     /**
      * 设置表格样式：边框、对齐等
      */
@@ -2576,4 +2242,3 @@ public class WordProcessor {
         }
     }
 }
-
