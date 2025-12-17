@@ -328,35 +328,21 @@ public class TableFillProcessor {
         return null;
     }
     
-    /**
-     * 设置单元格文本（保持格式）
-     */
+    /** 设置单元格文本（设置黑色字体） */
     private void setCellText(XWPFTableCell cell, String text) {
-        if (cell == null || text == null) {
-            return;
-        }
+        if (cell == null || text == null) return;
         
-        // 清除现有内容
-        List<XWPFParagraph> paragraphs = cell.getParagraphs();
-        for (int i = paragraphs.size() - 1; i > 0; i--) {
-            cell.removeParagraph(i);
-        }
+        // 清除多余段落，只保留一个
+        while (cell.getParagraphs().size() > 1) cell.removeParagraph(cell.getParagraphs().size() - 1);
+        if (cell.getParagraphs().isEmpty()) cell.addParagraph();
         
-        if (paragraphs.isEmpty()) {
-            cell.addParagraph();
-            paragraphs = cell.getParagraphs();
-        }
+        XWPFParagraph para = cell.getParagraphs().get(0);
+        while (!para.getRuns().isEmpty()) para.removeRun(0);
         
-        XWPFParagraph para = paragraphs.get(0);
-        
-        // 清除现有runs
-        while (!para.getRuns().isEmpty()) {
-            para.removeRun(0);
-        }
-        
-        // 添加新文本
+        // 添加新文本并设置黑色字体
         XWPFRun run = para.createRun();
         run.setText(text);
+        run.setColor("000000"); // 设置字体颜色为黑色
     }
 }
 
