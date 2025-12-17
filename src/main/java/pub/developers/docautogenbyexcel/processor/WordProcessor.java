@@ -11,7 +11,6 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.math.BigInteger;
 import java.util.List;
-import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -21,11 +20,9 @@ import java.util.regex.Pattern;
  */
 public class WordProcessor {
     
-    // 通用章节编号模式：匹配任意层级的编号，如 1, 1.1, 1.1.1, 1.1.1.1 等
-    private static final Pattern SECTION_NUMBER_PATTERN = Pattern.compile("^(\\d+(?:\\.\\d+)*)\\s+(.+)$");
-    // 章节标题匹配模式：X.X 模块名称（保留向后兼容，但推荐使用 SECTION_NUMBER_PATTERN）
-    private static final Pattern SECTION_PATTERN = SECTION_NUMBER_PATTERN;
-    // 占位符匹配模式：X.x 或 X.X.x 等，表示该章节下有多个子章节
+    // 通用章节编号模式：匹配任意层级，如 1, 1.1, 1.1.1 等
+    private static final Pattern SECTION_PATTERN = Pattern.compile("^(\\d+(?:\\.\\d+)*)\\s+(.+)$");
+    // 占位符匹配模式：X.x 或 X.X.x 等
     private static final Pattern PLACEHOLDER_PATTERN = Pattern.compile("^(\\d+(?:\\.\\d+)*)\\.x\\s*(.+)?$", Pattern.CASE_INSENSITIVE);
     
     // 目录样式 ID: 22=toc1, 25=toc2, 16=toc3
@@ -476,8 +473,8 @@ public class WordProcessor {
                                 // 当前插入点已经超过边界，使用边界前一个位置
                                 System.out.println("警告: 插入点(" + currentIndex + ")超过边界(" + sectionBoundaryIndex + ")，调整到边界前");
                                 // 在边界之前插入，使用下一个主章节的前一个段落
-                                CTP prevPara = body.getPArray(sectionBoundaryIndex - 1);
-                                actualInsertPoint = new XWPFParagraph(prevPara, document);
+                                    CTP prevPara = body.getPArray(sectionBoundaryIndex - 1);
+                                    actualInsertPoint = new XWPFParagraph(prevPara, document);
                             }
                         }
                         
@@ -626,7 +623,7 @@ public class WordProcessor {
                 }
 
                 // 使用通用模式匹配任意层级的章节编号
-                Matcher matcher = SECTION_NUMBER_PATTERN.matcher(text.trim());
+                Matcher matcher = SECTION_PATTERN.matcher(text.trim());
                 if (matcher.matches()) {
                     String sectionNumber = matcher.group(1);
                     // 只处理层级大于2的子章节（如 X.X.X 或更深层级）
@@ -763,152 +760,56 @@ public class WordProcessor {
             // 如果遇到Heading样式，停止查找
             String text = para.getText();
             if (text != null && !text.trim().isEmpty() && isHeadingStyle(styleName)) {
-                break;
+                    break;
             }
         }
     }
     
-    /**
-     * 从Run中提取格式信息（如果Run没有直接格式，则从段落样式推断）
-     */
+    /** 从Run中提取格式信息（使用默认值填充缺失的格式） */
     private RunFormat extractRunFormat(XWPFRun run) {
-        if (run == null) {
-            return new RunFormat("黑体", 12, false);
-        }
-        
-        String fontFamily = run.getFontFamily();
-        Integer fontSize = null;
-        Boolean bold = run.isBold();
-        
-        try {
+        if (run == null) return new RunFormat("黑体", 12, false);
+        String font = run.getFontFamily();
             int size = run.getFontSize();
-            if (size > 0) {
-                fontSize = size;
-            }
-        } catch (Exception e) {
-            // 忽略
-        }
+        return new RunFormat(
+            (font == null || font.isEmpty()) ? "黑体" : font,
+            size > 0 ? size : 12,
+            run.isBold()
+        );
+    }
+    
+    /** 从模板子章节段落中提取格式 */
+    private SubSectionFormat extractSubSectionFormat(XWPFParagraph para) {
+        SubSectionFormat fmt = new SubSectionFormat();
+        if (para == null) return fmt;
         
-        // 如果Run没有直接格式，从段落样式推断默认格式
-        if (fontFamily == null || fontFamily.isEmpty() || fontSize == null) {
-            XWPFParagraph para = (XWPFParagraph) run.getParent();
-            if (para != null) {
                 String styleId = para.getStyle();
-                // 根据样式ID推断格式
-                // Heading 3 (ID=4): 黑体
-                // Caption (ID=11): 黑体
-                if (styleId != null) {
-                    if (styleId.equals("4") || styleId.toLowerCase().contains("heading")) {
-                        if (fontFamily == null || fontFamily.isEmpty()) {
-                            fontFamily = "黑体";
-                        }
-                    } else if (styleId.equals("11") || styleId.toLowerCase().contains("caption")) {
-                        if (fontFamily == null || fontFamily.isEmpty()) {
-                            fontFamily = "黑体";
-                        }
-                    }
-                }
-            }
-        }
+        if (styleId != null) fmt.styleId = styleId;
         
-        // 最终默认值
-        if (fontFamily == null || fontFamily.isEmpty()) {
-            fontFamily = "黑体";
-        }
-        if (fontSize == null) {
-            fontSize = 12;  // 默认小四号
-        }
-        
-        return new RunFormat(fontFamily, fontSize, bold);
-    }
-    
-    /**
-     * 从模板子章节段落中提取格式
-     * 分析编号部分和内容部分的格式（可能不同）
-     * 对于 Heading 3 样式，Word 模板通常使用自动编号：
-     * - 编号部分：黑体 10号字体
-     * - 内容部分：黑体 12pt (小四号)
-     */
-    private SubSectionFormat extractSubSectionFormat(XWPFParagraph templatePara) {
-        SubSectionFormat format = new SubSectionFormat();
-        
-        if (templatePara == null) {
-            return format;
-        }
-        
-        // 获取样式ID
-        String styleId = templatePara.getStyle();
-        if (styleId != null) {
-            format.styleId = styleId;
-        }
-        
-        List<XWPFRun> runs = templatePara.getRuns();
-        
-        // 对于 Heading 3 样式，通常使用自动编号，内容文本没有编号
-        // 根据模板的样式，默认格式为：
-        // - 编号：黑体 10号
-        // - 内容：黑体 12pt
-        boolean isHeading3 = styleId != null && 
-            (styleId.equals("4") || styleId.toLowerCase().contains("heading"));
-        
-        if (isHeading3) {
-            // Heading 3 的默认格式
-            format.numberFormat = new RunFormat("黑体", 10, false);  // 编号用10号字体
-            format.contentFormat = new RunFormat("黑体", 12, false); // 内容用12pt (小四号)
+        List<XWPFRun> runs = para.getRuns();
+        if (runs != null && runs.size() >= 2) {
+            fmt.numberFormat = extractRunFormat(runs.get(0));
+            fmt.contentFormat = extractRunFormat(runs.get(1));
         } else if (runs != null && !runs.isEmpty()) {
-            // 其他样式，从 Run 中提取
-            if (runs.size() >= 2) {
-                format.numberFormat = extractRunFormat(runs.get(0));
-                format.contentFormat = extractRunFormat(runs.get(1));
-            } else {
-                RunFormat singleFormat = extractRunFormat(runs.get(0));
-                format.numberFormat = singleFormat;
-                format.contentFormat = singleFormat;
-            }
+            fmt.numberFormat = fmt.contentFormat = extractRunFormat(runs.get(0));
         }
-        
-        System.out.println("提取子章节格式: 编号[" + format.numberFormat.fontFamily + ", " + 
-            format.numberFormat.fontSize + "pt], 内容[" + format.contentFormat.fontFamily + ", " + 
-            format.contentFormat.fontSize + "pt]");
-        
-        return format;
+        System.out.println("提取子章节格式: 编号[" + fmt.numberFormat.fontFamily + ", " + 
+            fmt.numberFormat.fontSize + "pt], 内容[" + fmt.contentFormat.fontFamily + ", " + fmt.contentFormat.fontSize + "pt]");
+        return fmt;
     }
     
-    /**
-     * 从模板Caption段落中提取格式
-     * Caption 样式默认格式：
-     * - 黑体 12pt (小四号)
-     */
-    private CaptionFormat extractCaptionFormat(XWPFParagraph templateCaption) {
-        CaptionFormat format = new CaptionFormat();
+    /** 从模板Caption段落中提取格式 */
+    private CaptionFormat extractCaptionFormat(XWPFParagraph para) {
+        CaptionFormat fmt = new CaptionFormat();
+        if (para == null) return fmt;
         
-        if (templateCaption == null) {
-            return format;
-        }
+        String styleId = para.getStyle();
+        if (styleId != null) fmt.styleId = styleId;
         
-        // 获取样式ID
-        String styleId = templateCaption.getStyle();
-        if (styleId != null) {
-            format.styleId = styleId;
-        }
+        List<XWPFRun> runs = para.getRuns();
+        if (runs != null && !runs.isEmpty()) fmt.format = extractRunFormat(runs.get(0));
         
-        // 对于 Caption 样式，使用默认格式：黑体 12pt
-        boolean isCaption = styleId != null && 
-            (styleId.equals("11") || styleId.toLowerCase().contains("caption"));
-        
-        if (isCaption) {
-            format.format = new RunFormat("黑体", 12, false);
-        } else {
-            List<XWPFRun> runs = templateCaption.getRuns();
-            if (runs != null && !runs.isEmpty()) {
-                format.format = extractRunFormat(runs.get(0));
-            }
-        }
-        
-        System.out.println("提取Caption格式: [" + format.format.fontFamily + ", " + 
-            format.format.fontSize + "pt, bold=" + format.format.bold + "]");
-        
-        return format;
+        System.out.println("提取Caption格式: [" + fmt.format.fontFamily + ", " + fmt.format.fontSize + "pt, bold=" + fmt.format.bold + "]");
+        return fmt;
     }
     
     /**
@@ -1099,7 +1000,7 @@ public class WordProcessor {
             try {
                 String text = para.getText();
                 if (text == null || text.trim().isEmpty() || !isTocStyle(para.getStyle())) continue;
-                Matcher m = SECTION_NUMBER_PATTERN.matcher(text.trim());
+                Matcher m = SECTION_PATTERN.matcher(text.trim());
                 if (m.matches() && !sections.contains(m.group(1))) {
                     sections.add(m.group(1));
                 }
@@ -1122,8 +1023,8 @@ public class WordProcessor {
                 if (m.matches() && moduleNumber.equals(m.group(1))) {
                     tocName = m.group(2).split("\t")[0].trim();
                     System.out.println("从目录提取章节名称: " + moduleNumber + " -> " + tocName);
-                    break;
-                }
+                            break;
+                        }
             } catch (Exception e) { /* ignore */ }
         }
         
@@ -1138,15 +1039,15 @@ public class WordProcessor {
                 // 通过编号匹配
                 if (m.matches() && moduleNumber.equals(m.group(1))) {
                     System.out.println("在正文中找到章节(通过编号): " + trimmed + " [" + style + "]");
-                    return para;
-                }
+                        return para;
+                    }
                 // 通过名称+样式匹配
                 if (trimmed.equals(tocName) && isHeadingStyle(style)) {
                     System.out.println("在正文中找到章节(通过名称+样式): " + trimmed + " [" + style + "]");
                     return para;
                 }
             } catch (Exception e) { /* ignore */ }
-        }
+            }
         return null;
     }
 
@@ -1353,112 +1254,65 @@ public class WordProcessor {
         }
     }
     
-    /**
-     * 复制表格到指定段落后
-     */
-    private CTTbl copyTable(XWPFDocument document, CTP afterParagraph, CTTbl sourceTable) {
+    /** 复制表格到指定段落后 */
+    private CTTbl copyTable(XWPFDocument document, CTP afterParagraph, CTTbl source) {
         try {
-            // 使用XmlCursor在段落后插入表格
-            org.apache.xmlbeans.XmlCursor paraCursor = afterParagraph.newCursor();
-            paraCursor.toEndToken();
-            paraCursor.toNextToken();
+            org.apache.xmlbeans.XmlCursor cursor = afterParagraph.newCursor();
+            cursor.toEndToken();
+            cursor.toNextToken();
+            cursor.beginElement(new javax.xml.namespace.QName("http://schemas.openxmlformats.org/wordprocessingml/2006/main", "tbl", "w"));
+            cursor.toParent();
             
-            // 插入新的表格元素
-            paraCursor.beginElement(
-                new javax.xml.namespace.QName("http://schemas.openxmlformats.org/wordprocessingml/2006/main", "tbl", "w"));
-            paraCursor.toParent();
+            CTTbl target = (cursor.getObject() instanceof CTTbl) ? (CTTbl) cursor.getObject() : null;
+            cursor.close();
+            if (target == null) return null;
             
-            // 获取刚插入的CTTbl对象
-            CTTbl newTable = null;
-            if (paraCursor.getObject() instanceof CTTbl) {
-                newTable = (CTTbl) paraCursor.getObject();
-            }
-            
-            paraCursor.close();
-            
-            if (newTable == null) {
-                return null;
-            }
-            
-            // 复制表格内容（行和单元格结构）
-            for (int i = 0; i < sourceTable.sizeOfTrArray(); i++) {
-                CTRow sourceRow = sourceTable.getTrArray(i);
-                CTRow newRow = newTable.addNewTr();
+            // 复制表格行和单元格
+            for (int i = 0; i < source.sizeOfTrArray(); i++) {
+                CTRow srcRow = source.getTrArray(i);
+                CTRow newRow = target.addNewTr();
+                if (srcRow.isSetTrPr()) newRow.setTrPr((CTTrPr) srcRow.getTrPr().copy());
                 
-                // 复制行的属性
-                if (sourceRow.isSetTrPr()) {
-                    newRow.setTrPr((CTTrPr) sourceRow.getTrPr().copy());
-                }
-                
-                // 复制单元格
-                for (int j = 0; j < sourceRow.sizeOfTcArray(); j++) {
-                    CTTc sourceCell = sourceRow.getTcArray(j);
+                for (int j = 0; j < srcRow.sizeOfTcArray(); j++) {
+                    CTTc srcCell = srcRow.getTcArray(j);
                     CTTc newCell = newRow.addNewTc();
-                    
-                    // 复制单元格属性（包括合并信息）
-                    if (sourceCell.getTcPr() != null) {
-                        newCell.setTcPr((CTTcPr) sourceCell.getTcPr().copy());
-                    }
+                    if (srcCell.getTcPr() != null) newCell.setTcPr((CTTcPr) srcCell.getTcPr().copy());
                     
                     // 只复制标签列的内容
-                    // 对于第一行：复制单元格0和2（测试项名称、标识）
-                    // 对于其他行：复制单元格0（标签）
-                    boolean shouldCopyContent = (i == 0 && (j == 0 || j == 2)) || (i > 0 && j == 0);
-                    
-                    if (shouldCopyContent) {
-                        // 复制内容
-                        for (int k = 0; k < sourceCell.sizeOfPArray(); k++) {
-                            CTP sourceP = sourceCell.getPArray(k);
-                            CTP newP = newCell.addNewP();
-                            
-                            // 复制段落属性
-                            if (sourceP.getPPr() != null) {
-                                newP.setPPr((CTPPr) sourceP.getPPr().copy());
-                            }
-                            
-                            // 复制段落内容（run）
-                            for (int m = 0; m < sourceP.sizeOfRArray(); m++) {
-                                CTR sourceR = sourceP.getRArray(m);
-                                CTR newR = newP.addNewR();
-                                
-                                // 复制run属性
-                                if (sourceR.getRPr() != null) {
-                                    newR.setRPr((CTRPr) sourceR.getRPr().copy());
-                                }
-                                
-                                // 复制文本内容
-                                for (int n = 0; n < sourceR.sizeOfTArray(); n++) {
-                                    CTText sourceT = sourceR.getTArray(n);
-                                    CTText newT = newR.addNewT();
-                                    newT.setStringValue(sourceT.getStringValue());
-                                    if (sourceT.getSpace() != null) {
-                                        newT.setSpace(sourceT.getSpace());
-                                    }
-                                }
-                            }
-                        }
+                    if ((i == 0 && (j == 0 || j == 2)) || (i > 0 && j == 0)) {
+                        copyCellContent(srcCell, newCell);
                     } else {
-                        // 创建空段落
                         newCell.addNewP();
                     }
                 }
             }
             
-            // 复制表格属性
-            if (sourceTable.getTblPr() != null) {
-                newTable.setTblPr((CTTblPr) sourceTable.getTblPr().copy());
-            }
-            
-            // 复制表格网格
-            if (sourceTable.getTblGrid() != null) {
-                newTable.setTblGrid((CTTblGrid) sourceTable.getTblGrid().copy());
-            }
-            
-            return newTable;
+            if (source.getTblPr() != null) target.setTblPr((CTTblPr) source.getTblPr().copy());
+            if (source.getTblGrid() != null) target.setTblGrid((CTTblGrid) source.getTblGrid().copy());
+            return target;
         } catch (Exception e) {
             System.err.println("复制表格失败: " + e.getMessage());
-//            e.printStackTrace();
             return null;
+        }
+    }
+    
+    /** 复制单元格内容 */
+    private void copyCellContent(CTTc src, CTTc dest) {
+        for (int k = 0; k < src.sizeOfPArray(); k++) {
+            CTP srcP = src.getPArray(k);
+            CTP newP = dest.addNewP();
+            if (srcP.getPPr() != null) newP.setPPr((CTPPr) srcP.getPPr().copy());
+            for (int m = 0; m < srcP.sizeOfRArray(); m++) {
+                CTR srcR = srcP.getRArray(m);
+                CTR newR = newP.addNewR();
+                if (srcR.getRPr() != null) newR.setRPr((CTRPr) srcR.getRPr().copy());
+                for (int n = 0; n < srcR.sizeOfTArray(); n++) {
+                    CTText srcT = srcR.getTArray(n);
+                    CTText newT = newR.addNewT();
+                    newT.setStringValue(srcT.getStringValue());
+                    if (srcT.getSpace() != null) newT.setSpace(srcT.getSpace());
+                }
+            }
         }
     }
     
@@ -1469,132 +1323,54 @@ public class WordProcessor {
      */
     private CTTbl findTableCttblAfterParagraph(CTBody body, CTP paragraph) {
         int pIndex = findParagraphIndexInBody(body, paragraph);
-        if (pIndex == -1) {
-            return null;
-        }
+        if (pIndex == -1) return null;
         
-        // 调试信息：检查段落内容
-        try {
-            XWPFParagraph para = new XWPFParagraph(paragraph, null);
-            String paraText = para.getText();
-            // 如果段落是子章节标题（任意层级，如"4.3.2 注册功能测试"），且是新创建的，后面不应该有表格
-            if (paraText != null) {
-                Matcher matcher = SECTION_NUMBER_PATTERN.matcher(paraText.trim());
-                if (matcher.matches() && getSectionLevel(matcher.group(1)) > 2) {
-                    // 这是子章节（层级>2），检查是否是刚创建的
-                    // 如果是新创建的子章节，后面不应该有表格，应该返回null
-                }
-            }
-        } catch (Exception e) {
-            // 忽略异常
-        }
-        
-        // 方法1：使用XML cursor查找紧邻的表格（只查找直接相邻的表格，跳过最多1个空行段落）
+        // 使用XML cursor查找紧邻的表格（跳过最多1个空行段落）
         org.apache.xmlbeans.XmlCursor cursor = paragraph.newCursor();
         cursor.toEndToken();
-        
         int emptyParaCount = 0;
-        // 移动到下一个兄弟元素（跳过空行段落，但最多跳过1个）
         while (cursor.toNextSibling()) {
             org.apache.xmlbeans.XmlObject obj = cursor.getObject();
-            
-            // 检查是否是表格
-            if (obj instanceof CTTbl) {
-                cursor.close();
-                return (CTTbl) obj;
-            }
-            
-            // 如果是段落，检查是否为空行
+            if (obj instanceof CTTbl) { cursor.close(); return (CTTbl) obj; }
             if (obj instanceof CTP nextPara) {
-                String paraText = "";
-                try {
-                    XWPFParagraph xwpfPara = new XWPFParagraph(nextPara, null);
-                    paraText = xwpfPara.getText();
-                } catch (Exception e) {
-                    // 忽略异常，继续查找
-                }
-                // 如果段落不为空，停止查找（表格应该在空行之后，但中间不应该有其他内容段落）
-                if (paraText != null && !paraText.trim().isEmpty()) {
-                    break;
-                } else {
-                    // 空行段落，计数
-                    emptyParaCount++;
-                    // 如果已经有空行段落，继续查找表格
-                    if (emptyParaCount > 1) {
-                        // 如果已经有多个空行段落，停止查找（表格应该更近）
-                        break;
-                    }
-                }
-            } else {
-                // 遇到其他类型的元素，停止查找
-                break;
-            }
+                String text = "";
+                try { text = new XWPFParagraph(nextPara, null).getText(); } catch (Exception ignored) {}
+                if (text != null && !text.trim().isEmpty()) break;
+                if (++emptyParaCount > 1) break;
+            } else break;
         }
         cursor.close();
         
-        // 方法2：在body的表格数组中查找，检查是否在段落后（跳过空行段落）
-        // 找到段落后的第一个表格，但只返回紧邻的表格（中间最多只有空行段落）
-        CTTbl closestTable = null;
+        // 方法2：在body表格数组中查找紧邻的表格
         org.apache.xmlbeans.XmlCursor paraEndCursor = paragraph.newCursor();
         paraEndCursor.toEndToken();
+        CTTbl closestTable = null;
         
         for (int i = 0; i < body.sizeOfTblArray(); i++) {
             CTTbl tbl = body.getTblArray(i);
             org.apache.xmlbeans.XmlCursor tblCursor = tbl.newCursor();
-            
-            // 如果表格在段落后
             if (tblCursor.comparePosition(paraEndCursor) > 0) {
-                // 检查中间是否有其他段落（非空行）
-                boolean hasNonEmptyParaBetween = false;
+                boolean hasNonEmpty = false;
                 for (int j = pIndex + 1; j < body.sizeOfPArray(); j++) {
-                    CTP checkPara = body.getPArray(j);
-                    org.apache.xmlbeans.XmlCursor checkCursor = checkPara.newCursor();
-                    
-                    // 如果这个段落在表格之前
-                    if (checkCursor.comparePosition(tblCursor) < 0) {
-                        String checkText = "";
-                        try {
-                            XWPFParagraph xwpfCheckPara = new XWPFParagraph(checkPara, null);
-                            checkText = xwpfCheckPara.getText();
-                        } catch (Exception e) {
-                            // 忽略异常
-                        }
-                        // 如果段落不为空，说明表格不是紧邻的
-                        if (checkText != null && !checkText.trim().isEmpty()) {
-                            hasNonEmptyParaBetween = true;
-                            checkCursor.close();
-                            break;
-                        }
-                        checkCursor.close();
-                    } else {
-                        checkCursor.close();
-                        break;
-                    }
+                    CTP cp = body.getPArray(j);
+                    org.apache.xmlbeans.XmlCursor cc = cp.newCursor();
+                    if (cc.comparePosition(tblCursor) < 0) {
+                        String t = "";
+                        try { t = new XWPFParagraph(cp, null).getText(); } catch (Exception ignored) {}
+                        if (t != null && !t.trim().isEmpty()) { hasNonEmpty = true; cc.close(); break; }
+                        cc.close();
+                    } else { cc.close(); break; }
                 }
-                
-                if (!hasNonEmptyParaBetween) {
-                    // 找到紧邻的表格，记录它
-                    if (closestTable == null) {
-                        closestTable = tbl;
-                    } else {
-                        // 如果有多个紧邻的表格，选择最近的（位置最小的）
-                        org.apache.xmlbeans.XmlCursor closestCursor = closestTable.newCursor();
-                        if (tblCursor.comparePosition(closestCursor) < 0) {
+                if (!hasNonEmpty && (closestTable == null || tblCursor.comparePosition(closestTable.newCursor()) < 0)) {
                             closestTable = tbl;
                         }
-                        closestCursor.close();
                     }
-                }
-            }
-            
             tblCursor.close();
         }
-        
         paraEndCursor.close();
-
-        return closestTable;
-    }
-    
+            return closestTable;
+        }
+        
     /** 找到下一个主章节（用于确定当前章节的边界） */
     private XWPFParagraph findNextMainSection(XWPFDocument document, XWPFParagraph currentPara, String currentNumber) {
         boolean found = false;
@@ -1661,119 +1437,41 @@ public class WordProcessor {
         return new XWPFParagraph(body.addNewP(), document);
     }
     
-    /**
-     * 填充表格数据（识别Word表格格式并填充）
-     * 支持两种格式：
-     * 1. 2列格式：左列是标签，右列是数据（从Word表格读取标签）
-     * 2. 多列表格式：第1行是表头，后续行是数据（如果Word表格是空的或格式不匹配）
-     */
+    /** 填充表格数据（根据标签列匹配Excel数据） */
     private void fillTableData(XWPFTable table, TestCase testCase) {
         int rowCount = table.getNumberOfRows();
-        if (rowCount == 0) {
-            System.err.println("警告：表格为空，无法填充数据");
-            return;
-        }
+        if (rowCount == 0) { System.err.println("警告：表格为空"); return; }
         
-        // 检查表格格式：读取第一行，判断是2列格式还是多列格式
+        java.util.Set<String> cols = testCase.getColumnData().keySet();
         XWPFTableRow firstRow = table.getRow(0);
-        int firstRowCellCount = firstRow != null ? firstRow.getTableCells().size() : 0;
-        
-        // 如果第一行只有2列，且第二行也是2列，则认为是2列格式（标签-数据格式）
-        boolean isTwoColumnFormat = false;
-        if (firstRowCellCount == 2 && rowCount > 1) {
-            XWPFTableRow secondRow = table.getRow(1);
-            if (secondRow != null && secondRow.getTableCells().size() == 2) {
-                // 读取第一行和第二行的左列内容，判断是否是标签格式
-                String firstRowLeft = getCellText(firstRow.getCell(0));
-                String secondRowLeft = getCellText(secondRow.getCell(0));
-                
-                // 如果左列包含常见的标签关键词，则认为是2列格式
-                // 或者左列是Excel列名（如testName, id等），也认为是2列格式
-                if (firstRowLeft.contains("测试项名称") || firstRowLeft.contains("标识") ||
-                    secondRowLeft.contains("测试内容") || secondRowLeft.contains("测试项名称") ||
-                    secondRowLeft.contains("测试策略") || secondRowLeft.contains("判定准则") ||
-                    firstRowLeft.equals("testName") || firstRowLeft.equals("id") ||
-                    secondRowLeft.equals("content") || secondRowLeft.equals("strategy") ||
-                    secondRowLeft.equals("criteria") || secondRowLeft.equals("stopCondition") ||
-                    secondRowLeft.equals("trace")) {
-                    isTwoColumnFormat = true;
-                }
-            }
-        }
-        
-        if (isTwoColumnFormat) {
-            // 2列格式：读取Word表格左列的标签，从Excel中找到对应的数据填充到右列
-            fillTwoColumnTable(table, testCase);
-        } else {
-            // 多列格式：使用Excel的列名作为表头
-            fillMultiColumnTable(table, testCase);
-        }
-    }
-    
-    /**
-     * 填充2列格式的表格（左列标签，右列数据）
-     */
-    private void fillTwoColumnTable(XWPFTable table, TestCase testCase) {
-        Map<String, String> columnData = testCase.getColumnData();
-        
-        int rowCount = table.getNumberOfRows();
-        if (rowCount == 0) {
-            return;
-        }
-        
-        XWPFTableRow firstRow = table.getRow(0);
-        int firstRowCellCount = firstRow != null ? firstRow.getTableCells().size() : 0;
         int startRow = 0;
         
-        // 如果第一行是4列格式，特殊处理第一行
-        if (firstRowCellCount == 4) {
-            fillFourColumnFirstRow(firstRow, testCase, columnData.keySet());
+        // 如果第一行是4列格式，特殊处理
+        if (firstRow != null && firstRow.getTableCells().size() >= 4) {
+            fillCellByLabel(firstRow, 0, 1, testCase, cols);
+            fillCellByLabel(firstRow, 2, 3, testCase, cols);
             startRow = 1;
         }
-        
-        // 处理数据行
+
         for (int i = startRow; i < rowCount; i++) {
             XWPFTableRow row = table.getRow(i);
-            if (row == null || row.getTableCells().size() < 2) {
-                continue;
+            if (row != null && row.getTableCells().size() >= 2) {
+                int dataCell = row.getTableCells().size() >= 3 ? 2 : 1;
+                fillCellByLabel(row, 0, dataCell, testCase, cols);
             }
-            fillRowByLabel(row, testCase, columnData.keySet());
         }
     }
     
-    /** 填充4列格式的第一行 */
-    private void fillFourColumnFirstRow(XWPFTableRow firstRow, TestCase testCase, java.util.Set<String> columnNames) {
-        String firstCol = getCellText(firstRow.getCell(0)).trim();
-        String thirdCol = getCellText(firstRow.getCell(2)).trim();
-        
-        String firstColMatch = findMatchingColumn(firstCol, columnNames);
-        if (firstColMatch != null) {
-            setCellValue(firstRow.getCell(1), testCase.getColumnValue(firstColMatch));
-        }
-        
-        String thirdColMatch = findMatchingColumn(thirdCol, columnNames);
-        if (thirdColMatch != null) {
-            setCellValue(firstRow.getCell(3), testCase.getColumnValue(thirdColMatch));
-        }
+    /** 根据标签单元格查找并填充数据单元格 */
+    private void fillCellByLabel(XWPFTableRow row, int labelIdx, int dataIdx, TestCase testCase, java.util.Set<String> cols) {
+        String match = findMatchingColumn(getCellText(row.getCell(labelIdx)).trim(), cols);
+        if (match != null) setCellValue(row.getCell(dataIdx), testCase.getColumnValue(match));
     }
     
-    /** 根据标签列填充数据到数据列 */
-    private void fillRowByLabel(XWPFTableRow row, TestCase testCase, java.util.Set<String> columnNames) {
-        String label = getCellText(row.getCell(0)).trim();
-        String matchedColumn = findMatchingColumn(label, columnNames);
-        
-        if (matchedColumn != null) {
-            String value = testCase.getColumnValue(matchedColumn);
-            // 由于单元格合并，优先填充单元格2（如果存在），否则填充单元格1
-            int dataCell = row.getTableCells().size() >= 3 ? 2 : 1;
-            setCellValue(row.getCell(dataCell), value);
-        }
-    }
-    
-    /** 清空表格的数据列（只保留标签列） */
+    /** 清空表格的数据列（保留标签列） */
     private void clearTableDataColumns(XWPFTable table) {
         for (int i = 0; i < table.getNumberOfRows(); i++) {
-            XWPFTableRow row = table.getRow(i);
+                XWPFTableRow row = table.getRow(i);
             if (row == null) continue;
             int cellCount = row.getTableCells().size();
             if (i == 0 && cellCount >= 4) {
@@ -1792,53 +1490,16 @@ public class WordProcessor {
         cell.addParagraph();
     }
     
-    /** 在Excel列名集合中查找匹配的列名（支持完全匹配和模糊匹配） */
+    /** 在Excel列名集合中查找匹配的列名 */
     private String findMatchingColumn(String label, java.util.Set<String> cols) {
         if (label == null || label.isEmpty()) return null;
         if (cols.contains(label)) return label;
-        for (String col : cols) {
-            if (label.contains(col) || col.contains(label)) return col;
-        }
+        for (String col : cols) if (label.contains(col) || col.contains(label)) return col;
         String clean = label.replace(" ", "").replace("　", "");
-        for (String col : cols) {
-            if (clean.equals(col.replace(" ", "").replace("　", ""))) return col;
-        }
-        return null;
-    }
-    
-    /**
-     * 填充多列格式的表格（第1行是表头，后续行是数据）
-     */
-    private void fillMultiColumnTable(XWPFTable table, TestCase testCase) {
-        Map<String, String> columnData = testCase.getColumnData();
-        
-        if (columnData.isEmpty()) {
-            System.err.println("警告：测试用例没有列数据");
-            return;
+        for (String col : cols) if (clean.equals(col.replace(" ", "").replace("　", ""))) return col;
+            return null;
         }
         
-        int currentRowCount = table.getNumberOfRows();
-        if (currentRowCount == 0) {
-            System.err.println("警告：表格没有行，无法填充数据");
-            return;
-        }
-        
-        // 填充表头行（第1行，如果是4列格式）
-        XWPFTableRow headerRow = table.getRow(0);
-        if (headerRow != null && headerRow.getTableCells().size() >= 4) {
-            fillFourColumnFirstRow(headerRow, testCase, columnData.keySet());
-        }
-        
-        // 填充数据行（第2行及以后）
-        for (int i = 1; i < currentRowCount; i++) {
-            XWPFTableRow row = table.getRow(i);
-            if (row == null || row.getTableCells().size() < 2) {
-                continue;
-            }
-            fillRowByLabel(row, testCase, columnData.keySet());
-        }
-    }
-    
     /** 获取单元格文本内容 */
     private String getCellText(XWPFTableCell cell) {
         if (cell == null) return "";
@@ -1853,7 +1514,7 @@ public class WordProcessor {
         while (!cell.getParagraphs().isEmpty()) cell.removeParagraph(0);
         cell.addParagraph().createRun().setText(value != null ? value : "");
     }
-    
+
     /**
      * 设置表格样式：边框、对齐等
      */

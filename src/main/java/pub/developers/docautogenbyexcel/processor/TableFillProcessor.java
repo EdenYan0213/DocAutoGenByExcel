@@ -350,7 +350,7 @@ public class TableFillProcessor {
         XWPFParagraph para = paragraphs.get(0);
         
         // 清除现有runs
-        while (para.getRuns().size() > 0) {
+        while (!para.getRuns().isEmpty()) {
             para.removeRun(0);
         }
         
