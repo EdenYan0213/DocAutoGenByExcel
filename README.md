@@ -184,6 +184,20 @@ java -jar target/DocAutoGenByExcel-0.0.1-SNAPSHOT.jar \
   -word "template.docx" \
   -out "output"
 ```
+java -jar target/DocAutoGenByExcel-0.0.1-SNAPSHOT.jar \
+-excel "完整测试用例模板.xlsx" \
+-word "2-XX软件配置项测试报告(公开）.docx" \
+-out "output"
+
+java -jar target/DocAutoGenByExcel-0.0.1-SNAPSHOT.jar \
+-excel "test_data_enhanced.xlsx" \
+-word "1-XX测试大纲（公开）_副本.docx" \
+-out "output"
+
+java -jar target/DocAutoGenByExcel-0.0.1-SNAPSHOT.jar \
+-excel "2号文档完整填充模板.xlsx" \
+-word "2-XX软件配置项测试报告(公开）.docx" \
+-out "output"
 
 **示例2：使用配置文件**
 

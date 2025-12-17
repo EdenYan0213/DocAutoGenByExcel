@@ -26,10 +26,14 @@ public class WordProcessor {
     // 占位符匹配模式：X.x 或 X.X.x 等
     private static final Pattern PLACEHOLDER_PATTERN = Pattern.compile("^(\\d+(?:\\.\\d+)*)\\.x\\s*(.+)?$", Pattern.CASE_INSENSITIVE);
     
-    // 目录样式 ID: 22=toc1, 25=toc2, 16=toc3
-    private static final java.util.Set<String> TOC_STYLES = java.util.Set.of("22", "25", "16");
-    // 正文标题样式 ID: 2=Heading1, 3=Heading2, 4=Heading3, 5=Heading4
-    private static final java.util.Set<String> HEADING_STYLES = java.util.Set.of("2", "3", "4", "5");
+    // 目录样式 ID（不同Word模板可能使用不同ID）
+    private static final java.util.Set<String> TOC_STYLES = java.util.Set.of(
+        "22", "25", "16",   // 某些模板
+        "38", "46", "28",   // WPS/其他模板 (toc 1, toc 2, toc 3)
+        "11", "27", "39", "42", "31", "47"  // 更多toc样式 (toc 7, toc 5, toc 4, toc 6, toc 8, toc 9)
+    );
+    // 正文标题样式 ID: 2=Heading1, 3=Heading2, 4=Heading3, 5=Heading4...
+    private static final java.util.Set<String> HEADING_STYLES = java.util.Set.of("2", "3", "4", "5", "6", "7", "8", "9", "10");
     
     /**
      * 内部类：保存Run的格式信息
@@ -745,7 +749,8 @@ public class WordProcessor {
     /** 判断是否为Caption样式 */
     private static boolean isCaptionStyle(String styleName) {
         return styleName != null && (styleName.equalsIgnoreCase("Caption") ||
-            styleName.equals("11") || styleName.contains("题注"));
+            styleName.equals("11") || styleName.equals("15") || styleName.contains("题注") ||
+            styleName.toLowerCase().contains("caption"));
     }
 
     /**
@@ -1123,13 +1128,22 @@ public class WordProcessor {
                 CTRow newRow = target.addNewTr();
                 if (srcRow.isSetTrPr()) newRow.setTrPr((CTTrPr) srcRow.getTrPr().copy());
                 
+                // 检测是否是需要完整复制的行（如测试步骤列头行）
+                boolean isHeaderRow = false;
+                if (srcRow.sizeOfTcArray() > 0) {
+                    String firstCellText = getCellTextFromCTTc(srcRow.getTcArray(0));
+                    // 测试步骤列头行包含"序号"，需要完整复制
+                    isHeaderRow = "序号".equals(firstCellText.trim()) || 
+                                  firstCellText.contains("测试步骤");
+                }
+                
                 for (int j = 0; j < srcRow.sizeOfTcArray(); j++) {
                     CTTc srcCell = srcRow.getTcArray(j);
                     CTTc newCell = newRow.addNewTc();
                     if (srcCell.getTcPr() != null) newCell.setTcPr((CTTcPr) srcCell.getTcPr().copy());
                     
-                    // 只复制标签列的内容
-                    if ((i == 0 && (j == 0 || j == 2)) || (i > 0 && j == 0)) {
+                    // 复制标签列(第0列)、第一行的特定列、或完整的列头行
+                    if (j == 0 || (i == 0 && j == 2) || isHeaderRow) {
                         copyCellContent(srcCell, newCell);
                     } else {
                         newCell.addNewP();
@@ -1144,6 +1158,21 @@ public class WordProcessor {
             System.err.println("复制表格失败: " + e.getMessage());
             return null;
         }
+    }
+    
+    /** 从CTTc获取单元格文本 */
+    private String getCellTextFromCTTc(CTTc cell) {
+        StringBuilder sb = new StringBuilder();
+        for (int k = 0; k < cell.sizeOfPArray(); k++) {
+            CTP p = cell.getPArray(k);
+            for (int m = 0; m < p.sizeOfRArray(); m++) {
+                CTR r = p.getRArray(m);
+                for (int n = 0; n < r.sizeOfTArray(); n++) {
+                    sb.append(r.getTArray(n).getStringValue());
+                }
+            }
+        }
+        return sb.toString();
     }
     
     /** 复制单元格内容 */
@@ -1231,9 +1260,9 @@ public class WordProcessor {
                 return para;
             }
         }
-            return null;
-        }
-        
+        return null;
+    }
+    
     /** 找到章节的最后一个子章节（用于确定插入点） */
     private XWPFParagraph findLastElementInSection(XWPFDocument document, XWPFParagraph sectionPara, String sectionNumber) {
         List<XWPFParagraph> subs = findExistingSubSectionsInSection(document, sectionPara, sectionNumber);
@@ -1284,44 +1313,257 @@ public class WordProcessor {
         return new XWPFParagraph(body.addNewP(), document);
     }
     
-    /** 填充表格数据（根据标签列匹配Excel数据） */
+    /** 填充表格数据（通用方法，自动匹配任意表格结构） */
     private void fillTableData(XWPFTable table, TestCase testCase) {
         int rowCount = table.getNumberOfRows();
         if (rowCount == 0) { System.err.println("警告：表格为空"); return; }
         
         java.util.Set<String> cols = testCase.getColumnData().keySet();
-        XWPFTableRow firstRow = table.getRow(0);
-        int startRow = 0;
+        int subTableStart = -1, subTableEnd = -1;
         
-        // 如果第一行是4列格式，特殊处理
-        if (firstRow != null && firstRow.getTableCells().size() >= 4) {
-            fillCellByLabel(firstRow, 0, 1, testCase, cols);
-            fillCellByLabel(firstRow, 2, 3, testCase, cols);
-            startRow = 1;
-        }
-
-        for (int i = startRow; i < rowCount; i++) {
+        // 遍历所有行，识别子表格区域（如测试步骤）
+        for (int i = 0; i < rowCount; i++) {
             XWPFTableRow row = table.getRow(i);
-            if (row != null && row.getTableCells().size() >= 2) {
-                int dataCell = row.getTableCells().size() >= 3 ? 2 : 1;
-                fillCellByLabel(row, 0, dataCell, testCase, cols);
+            if (row == null) continue;
+            
+            int cellCount = row.getTableCells().size();
+            String firstCellText = getCellText(row.getCell(0)).trim();
+            
+            // 检测子表格标题行（如"测试步骤"）
+            if (isSubTableHeader(firstCellText)) {
+                subTableStart = i;
+                continue;
+            }
+            
+            // 检测子表格列头行（如"序号 | 输入及操作 | ..."）
+            if (subTableStart >= 0 && subTableEnd < 0 && isSubTableColumnHeader(row)) {
+                continue; // 跳过列头行
+            }
+            
+            // 检测子表格数据行（第一列是数字）
+            if (subTableStart >= 0 && firstCellText.matches("\\d+")) {
+                subTableEnd = i;
+                continue;
+            }
+            
+            // 如果已经离开子表格区域，重置标记
+            if (subTableStart >= 0 && subTableEnd >= 0 && !firstCellText.matches("\\d+") && !firstCellText.isEmpty()) {
+                // 子表格结束，继续处理普通行
+            }
+            
+            // 普通行：根据列数自动匹配
+            fillRowCells(row, cellCount, testCase, cols);
+        }
+        
+        // 填充子表格（测试步骤等）
+        if (subTableStart >= 0 && !testCase.getTestSteps().isEmpty()) {
+            fillSubTable(table, subTableStart, testCase);
+        }
+    }
+    
+    /** 检测是否为子表格标题行 */
+    private boolean isSubTableHeader(String text) {
+        if (text == null) return false;
+        return text.contains("测试步骤") || text.contains("操作步骤") || text.contains("执行步骤") ||
+               text.contains("步骤列表") || text.contains("测试过程");
+    }
+    
+    /** 检测是否为子表格列头行 */
+    private boolean isSubTableColumnHeader(XWPFTableRow row) {
+        if (row == null || row.getTableCells().size() < 2) return false;
+        String first = getCellText(row.getCell(0)).trim();
+        // 列头行通常第一列是"序号"或空，第二列是"步骤"/"操作"等
+        if (first.equals("序号") || first.isEmpty()) {
+            for (int i = 1; i < row.getTableCells().size(); i++) {
+                String text = getCellText(row.getCell(i)).trim();
+                if (text.contains("步骤") || text.contains("操作") || text.contains("输入") ||
+                    text.contains("预期") || text.contains("期望") || text.contains("结果")) {
+                    return true;
+                }
             }
         }
+        return false;
+    }
+    
+    /** 填充普通行的单元格 */
+    private void fillRowCells(XWPFTableRow row, int cellCount, TestCase testCase, java.util.Set<String> cols) {
+        if (cellCount >= 4) {
+            // 4列格式：标签1 | 数据1 | 标签2 | 数据2
+            fillCellByLabel(row, 0, 1, testCase, cols);
+            fillCellByLabel(row, 2, 3, testCase, cols);
+        } else if (cellCount >= 2) {
+            // 2列格式：标签 | 数据（数据可能跨多列）
+            fillCellByLabel(row, 0, cellCount - 1, testCase, cols);
+        }
+    }
+    
+    /** 填充子表格（测试步骤等） */
+    private void fillSubTable(XWPFTable table, int startRow, TestCase testCase) {
+        List<TestCase.TestStep> steps = testCase.getTestSteps();
+        if (steps.isEmpty()) return;
+        
+        // 找到列头行和列映射
+        int colHeaderRow = startRow;
+        String firstText = getCellText(table.getRow(startRow).getCell(0)).trim();
+        if (isSubTableHeader(firstText)) colHeaderRow = startRow + 1;
+        
+        // 构建列名到列索引的映射（只保留第一次出现的索引，处理合并单元格）
+        java.util.Map<String, Integer> colMap = new java.util.LinkedHashMap<>();
+        if (colHeaderRow < table.getNumberOfRows()) {
+            XWPFTableRow header = table.getRow(colHeaderRow);
+            for (int i = 0; i < header.getTableCells().size(); i++) {
+                String text = getCellText(header.getCell(i)).trim();
+                if (!text.isEmpty() && !colMap.containsKey(text)) {
+                    colMap.put(text, i);  // 只保留第一次出现的索引
+                }
+            }
+        }
+        
+        // 通用列名匹配
+        int stepNoCol = findColumnByKeywords(colMap, "序号", "No", "编号");
+        int actionCol = findColumnByKeywords(colMap, "输入", "操作", "步骤", "动作", "Action", "Step");
+        int expectedCol = findColumnByKeywords(colMap, "期望", "预期", "评估", "Expected");
+        int resultCol = findColumnByKeywords(colMap, "实测", "实际", "结果", "Result");
+        
+        // 如果找不到操作列，使用第二列作为默认
+        if (actionCol < 0 && colMap.size() >= 2) actionCol = 1;
+        // 如果找不到预期列，使用第三列作为默认
+        if (expectedCol < 0 && colMap.size() >= 3) expectedCol = 2;
+        
+        // 数据行从列头下一行开始
+        int dataRow = colHeaderRow + 1;
+        
+        // 找到测试步骤区域的所有行
+        java.util.List<Integer> stepRows = new java.util.ArrayList<>();
+        int nextSectionRow = -1;
+        for (int i = dataRow; i < table.getNumberOfRows(); i++) {
+            String firstCell = getCellText(table.getRow(i).getCell(0)).trim();
+            if (firstCell.matches("\\d+")) {
+                stepRows.add(i);
+            } else if (!firstCell.isEmpty()) {
+                nextSectionRow = i;
+                    break;
+                }
+        }
+        
+        int existingRows = stepRows.size();
+        int neededRows = steps.size();
+        
+        // 保存第一个数据行作为模板（用于添加新行）
+        CTRow templateCtRow = null;
+        if (!stepRows.isEmpty()) {
+            templateCtRow = (CTRow) table.getRow(stepRows.get(0)).getCtRow().copy();
+        }
+        
+        // 调整行数：删除多余的行或添加不足的行
+        if (existingRows > neededRows) {
+            // 删除多余的行（从后往前删）
+            for (int i = existingRows - 1; i >= neededRows; i--) {
+                table.removeRow(stepRows.get(i));
+            }
+        } else if (existingRows < neededRows && !stepRows.isEmpty()) {
+            // 添加不足的行：在正确位置插入并复制格式
+            int insertAt = stepRows.get(stepRows.size() - 1) + 1;
+            XWPFTableRow templateRow = table.getRow(stepRows.get(0));
+            
+            for (int i = 0; i < neededRows - existingRows; i++) {
+                // 在指定位置插入新行
+                XWPFTableRow newRow = table.insertNewTableRow(insertAt + i);
+                
+                // 复制行属性
+                if (templateRow.getCtRow().isSetTrPr()) {
+                    newRow.getCtRow().setTrPr((CTTrPr) templateRow.getCtRow().getTrPr().copy());
+                }
+                
+                // 为新行添加与模板相同数量的单元格，并复制每个单元格的完整属性
+                for (int c = 0; c < templateRow.getTableCells().size(); c++) {
+                    XWPFTableCell srcCell = templateRow.getCell(c);
+                    CTTc srcCtTc = srcCell.getCTTc();
+                    
+                    // 添加新单元格
+                    XWPFTableCell newCell = newRow.addNewTableCell();
+                    CTTc newCtTc = newCell.getCTTc();
+                    
+                    // 完整复制单元格属性（包括gridSpan、宽度、合并等）
+                    if (srcCtTc.isSetTcPr()) {
+                        newCtTc.setTcPr((CTTcPr) srcCtTc.getTcPr().copy());
+                    }
+                    
+                    // 清除默认段落，然后添加带有正确格式的段落
+                    while (!newCell.getParagraphs().isEmpty()) {
+                        newCell.removeParagraph(0);
+                    }
+                    XWPFParagraph newPara = newCell.addParagraph();
+                    if (!srcCell.getParagraphs().isEmpty()) {
+                        XWPFParagraph srcPara = srcCell.getParagraphs().get(0);
+                        if (srcPara.getCTP().isSetPPr()) {
+                            newPara.getCTP().setPPr((CTPPr) srcPara.getCTP().getPPr().copy());
+                        }
+                    }
+                }
+            }
+        }
+        
+        // 填充数据
+        for (int i = 0; i < steps.size(); i++) {
+            TestCase.TestStep step = steps.get(i);
+            int rowIndex = dataRow + i;
+            if (rowIndex >= table.getNumberOfRows()) break;
+            
+            XWPFTableRow row = table.getRow(rowIndex);
+            int cellCount = row.getTableCells().size();
+            
+            if (stepNoCol >= 0 && stepNoCol < cellCount) 
+                setCellValue(row.getCell(stepNoCol), String.valueOf(step.stepNo));
+            if (actionCol >= 0 && actionCol < cellCount) 
+                setCellValue(row.getCell(actionCol), step.action);
+            if (expectedCol >= 0 && expectedCol < cellCount) 
+                setCellValue(row.getCell(expectedCol), step.expected);
+            if (resultCol >= 0 && resultCol < cellCount) 
+                setCellValue(row.getCell(resultCol), step.result != null ? step.result : "");
+        }
+        System.out.println("填充测试步骤: " + steps.size() + " 条");
+    }
+    
+    /** 通过关键词查找列索引 */
+    private int findColumnByKeywords(java.util.Map<String, Integer> colMap, String... keywords) {
+        for (String keyword : keywords) {
+            for (var entry : colMap.entrySet()) {
+                if (entry.getKey().contains(keyword)) return entry.getValue();
+            }
+        }
+        return -1;
     }
     
     /** 根据标签单元格查找并填充数据单元格 */
     private void fillCellByLabel(XWPFTableRow row, int labelIdx, int dataIdx, TestCase testCase, java.util.Set<String> cols) {
-        String match = findMatchingColumn(getCellText(row.getCell(labelIdx)).trim(), cols);
-        if (match != null) setCellValue(row.getCell(dataIdx), testCase.getColumnValue(match));
+        String label = getCellText(row.getCell(labelIdx)).trim();
+        String match = findMatchingColumn(label, cols);
+        if (match != null) {
+            setCellValue(row.getCell(dataIdx), testCase.getColumnValue(match));
+        }
     }
     
-    /** 清空表格的数据列（保留标签列） */
+    /** 清空表格的数据列（保留标签列和列头行，通用方法） */
     private void clearTableDataColumns(XWPFTable table) {
         for (int i = 0; i < table.getNumberOfRows(); i++) {
-            XWPFTableRow row = table.getRow(i);
+                XWPFTableRow row = table.getRow(i);
             if (row == null) continue;
+            
+            // 跳过列头行（如"序号"、"输入及操作"等）
+            String firstCellText = getCellText(row.getCell(0)).trim();
+            if (firstCellText.equals("序号") || firstCellText.contains("测试步骤") ||
+                firstCellText.equals("测试用例标识")) {
+                    continue;
+                }
+                
             int cellCount = row.getTableCells().size();
-            if (i == 0 && cellCount >= 4) {
+            // 跳过数字序号行（测试步骤数据行），这些需要保留结构
+            if (firstCellText.matches("\\d+")) {
+                continue;
+            }
+            // 根据列数自动判断哪些是数据列
+            if (cellCount >= 4) {
                 clearCellContent(row.getCell(1));
                 clearCellContent(row.getCell(3));
             } else if (cellCount >= 2) {
@@ -1337,13 +1579,53 @@ public class WordProcessor {
         cell.addParagraph();
     }
     
-    /** 在Excel列名集合中查找匹配的列名 */
+    /** 在Excel列名集合中查找匹配的列名（通用模糊匹配） */
     private String findMatchingColumn(String label, java.util.Set<String> cols) {
         if (label == null || label.isEmpty()) return null;
+        
+        // 1. 精确匹配
         if (cols.contains(label)) return label;
-        for (String col : cols) if (label.contains(col) || col.contains(label)) return col;
-        String clean = label.replace(" ", "").replace("　", "");
-        for (String col : cols) if (clean.equals(col.replace(" ", "").replace("　", ""))) return col;
+        
+        // 2. 去除空格后精确匹配
+        String cleanLabel = label.replace(" ", "").replace("　", "").replace("\t", "");
+        for (String col : cols) {
+            String cleanCol = col.replace(" ", "").replace("　", "").replace("\t", "");
+            if (cleanLabel.equals(cleanCol)) return col;
+        }
+        
+        // 3. 包含匹配（双向）
+        for (String col : cols) {
+            if (label.contains(col) || col.contains(label)) return col;
+            if (cleanLabel.contains(col.replace(" ", "")) || col.replace(" ", "").contains(cleanLabel)) return col;
+        }
+        
+        // 4. 常见别名映射
+        java.util.Map<String, String[]> aliases = new java.util.LinkedHashMap<>();
+        aliases.put("测试用例标识", new String[]{"用例标识", "标识", "ID", "编号", "用例编号"});
+        aliases.put("测试项名称", new String[]{"测试项", "名称", "用例名称", "测试名称"});
+        aliases.put("设计人员", new String[]{"设计者", "编写人", "作者", "创建人"});
+        aliases.put("设计日期", new String[]{"创建日期", "编写日期", "日期"});
+        aliases.put("需求追踪", new String[]{"追溯", "追踪", "需求", "关联需求", "追溯合同"});
+        aliases.put("测试用例综述", new String[]{"综述", "描述", "说明", "概述", "用例描述"});
+        aliases.put("前提和约束", new String[]{"前提", "约束", "前置条件", "先决条件"});
+        aliases.put("测试用例终止条件", new String[]{"终止条件", "结束条件", "退出条件"});
+        aliases.put("测试用例通过准则", new String[]{"通过准则", "通过条件", "成功标准"});
+        aliases.put("测试结果示图", new String[]{"结果示图", "截图", "示图"});
+        aliases.put("测试人员", new String[]{"执行人", "执行者", "测试员"});
+        aliases.put("测试时间", new String[]{"执行时间", "执行日期", "时间"});
+        aliases.put("测试结论", new String[]{"结论", "结果", "判定"});
+        
+        for (var entry : aliases.entrySet()) {
+            String colName = entry.getKey();
+            if (!cols.contains(colName)) continue;
+            for (String alias : entry.getValue()) {
+                if (cleanLabel.contains(alias.replace(" ", "")) || 
+                    alias.replace(" ", "").contains(cleanLabel)) {
+                    return colName;
+                }
+            }
+        }
+        
         return null;
     }
     
@@ -1355,13 +1637,32 @@ public class WordProcessor {
         return sb.toString().trim();
     }
     
-    /** 设置单元格值（黑色字体） */
+    /** 设置单元格值（黑色字体，保持原有格式） */
     private void setCellValue(XWPFTableCell cell, String value) {
         if (cell == null) return;
-        while (!cell.getParagraphs().isEmpty()) cell.removeParagraph(0);
-        XWPFRun run = cell.addParagraph().createRun();
+        
+        XWPFParagraph para;
+        
+        if (!cell.getParagraphs().isEmpty()) {
+            // 使用第一个已有段落（保留其格式）
+            para = cell.getParagraphs().get(0);
+            // 清除现有的文本run
+            while (!para.getRuns().isEmpty()) {
+                para.removeRun(0);
+            }
+            // 删除多余段落
+            while (cell.getParagraphs().size() > 1) {
+                cell.removeParagraph(cell.getParagraphs().size() - 1);
+            }
+        } else {
+            // 没有段落则创建新的
+            para = cell.addParagraph();
+        }
+        
+        // 设置文本
+        XWPFRun run = para.createRun();
         run.setText(value != null ? value : "");
-        run.setColor("000000"); // 设置字体颜色为黑色
+        run.setColor("000000");
     }
     
     /**

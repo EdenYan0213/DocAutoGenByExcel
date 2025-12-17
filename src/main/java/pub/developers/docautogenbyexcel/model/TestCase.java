@@ -1,6 +1,8 @@
 package pub.developers.docautogenbyexcel.model;
 
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -9,14 +11,37 @@ import java.util.Map;
 public class TestCase {
     private String moduleNumber;  // 模块编号，如"5.3"
     private Map<String, String> columnData; // 动态列数据，key为列名，value为列值
+    private List<TestStep> testSteps; // 测试步骤列表
+
+    /** 测试步骤 */
+    public static class TestStep {
+        public int stepNo;        // 步骤序号
+        public String action;     // 测试步骤/操作（输入及操作）
+        public String expected;   // 预期结果（期望结果与评估标准）
+        public String result;     // 实测结果
+        
+        public TestStep(int stepNo, String action, String expected, String result) {
+            this.stepNo = stepNo;
+            this.action = action;
+            this.expected = expected;
+            this.result = result;
+        }
+    }
 
     public TestCase() {
         this.columnData = new LinkedHashMap<>();
+        this.testSteps = new ArrayList<>();
     }
 
     public TestCase(String moduleNumber) {
         this.moduleNumber = moduleNumber;
         this.columnData = new LinkedHashMap<>();
+        this.testSteps = new ArrayList<>();
+    }
+    
+    public List<TestStep> getTestSteps() { return testSteps; }
+    public void addTestStep(int stepNo, String action, String expected, String result) {
+        testSteps.add(new TestStep(stepNo, action, expected, result));
     }
 
     // Getters and Setters
