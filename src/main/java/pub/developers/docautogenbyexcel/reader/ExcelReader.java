@@ -87,7 +87,8 @@ public class ExcelReader {
             }
             
             if (sheet == null) {
-                throw new Exception("未找到包含'" + requiredColumn + "'列的Sheet，请确保Excel中有测试用例数据");
+                System.out.println("未找到包含'" + requiredColumn + "'列的Sheet，跳过测试用例处理（将只处理基本信息、列表型表格等）");
+                return moduleDataMap; // 返回空的Map，继续处理其他类型的表格
             }
             
             Row headerRow = sheet.getRow(0);

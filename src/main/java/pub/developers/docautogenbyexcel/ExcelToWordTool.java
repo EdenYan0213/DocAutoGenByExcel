@@ -42,21 +42,39 @@ public class ExcelToWordTool {
                 config.getOutputPath()
             );
             
-            // 处理Word模板
-            System.out.println("开始处理Word模板");
-            WordProcessor wordProcessor = new WordProcessor();
-            int successCount = wordProcessor.processWord(
-                config.getWordPath(), 
-                outputPath, 
-                moduleDataMap
-            );
+            // 处理Word模板（如果有测试用例数据）
+            int successCount = 0;
+            if (!moduleDataMap.isEmpty()) {
+                System.out.println("开始处理Word模板（测试用例）");
+                WordProcessor wordProcessor = new WordProcessor();
+                successCount = wordProcessor.processWord(
+                    config.getWordPath(), 
+                    outputPath, 
+                    moduleDataMap
+                );
+                System.out.println("成功处理 " + successCount + " 个测试用例模块");
+            } else {
+                System.out.println("未找到测试用例数据，跳过测试用例处理");
+                // 如果没有测试用例，直接复制Word模板到输出路径
+                try {
+                    java.nio.file.Files.copy(
+                        java.nio.file.Paths.get(config.getWordPath()),
+                        java.nio.file.Paths.get(outputPath),
+                        java.nio.file.StandardCopyOption.REPLACE_EXISTING
+                    );
+                } catch (Exception e) {
+                    throw new Exception("复制Word模板失败: " + e.getMessage());
+                }
+            }
             
             // 处理基本信息和列表型表格
             System.out.println("\n开始处理其他表格（基本信息、接口信息等）...");
             processAdditionalTables(config.getExcelPath(), outputPath);
             
             System.out.println("\n生成成功！输出文件: " + outputPath);
-            System.out.println("成功处理 " + successCount + " 个模块");
+            if (successCount > 0) {
+                System.out.println("成功处理 " + successCount + " 个测试用例模块");
+            }
             
         } catch (Exception e) {
             System.err.println("错误: " + e.getMessage());
