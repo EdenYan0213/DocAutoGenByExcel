@@ -11,6 +11,7 @@
 - ✅ **格式自适应**：自动提取并应用Word模板的格式
 - ✅ **Web界面**：提供友好的Web界面，支持文件上传、在线预览和下载
 - ✅ **REST API**：提供完整的REST API接口，支持集成到其他系统
+- ✅ **数据库存储**：支持将处理后的文档保存到数据库，支持从数据库查询和下载
 
 ## 🚀 快速开始
 
@@ -64,7 +65,10 @@ java -jar target/DocAutoGenByExcel-0.0.1-SNAPSHOT.jar \
   -word "2-XX软件配置项测试报告(公开）.docx" \
   -out "output"
 ```
-
+java -jar target/DocAutoGenByExcel-0.0.1-SNAPSHOT.jar \
+-excel "需求规格说明数据示例.xlsx" \
+-word "副本软件需求规格说明框架（公开）.docx" \
+-out "output"
 **示例2：使用配置文件**
 
 创建 `config.properties` 文件：
@@ -236,7 +240,21 @@ GET /api/documents/preview/{fileName}
 
 返回文件流，Content-Type设置为Word文档类型，浏览器会尝试在线预览。
 
-##### 5. 删除文档
+##### 5. 根据输出ID下载（推荐）
+
+**请求**
+
+```http
+GET /api/documents/download/id/{outputId}
+```
+
+**响应**
+
+返回文件流，浏览器会自动下载。
+
+**说明**：处理文档时会返回 `outputId`，使用ID下载更可靠，不受文件名变化影响。
+
+##### 6. 删除文档（根据文件名）
 
 **请求**
 
@@ -253,7 +271,24 @@ DELETE /api/documents/{fileName}
 }
 ```
 
-##### 6. 清理旧文件
+##### 7. 删除文档（根据输出ID）
+
+**请求**
+
+```http
+DELETE /api/documents/id/{outputId}
+```
+
+**响应**
+
+```json
+{
+  "success": true,
+  "message": "文档已删除"
+}
+```
+
+##### 8. 清理旧文件
 
 **请求**
 
@@ -472,15 +507,40 @@ debug.enabled=false
 
 ### 存储配置
 
-#### 本地存储（默认）
+#### 数据库存储（默认）
+
+文档内容存储在数据库中（MySQL）：
+- ✅ 数据集中管理，易于备份和迁移
+- ✅ 支持事务，数据一致性好
+- ✅ 支持根据ID或文件名查询和下载
+- ⚠️ 注意：大文件（>10MB）建议使用本地或S3存储
+
+**MySQL配置**：
+- 数据库名：`docautogen`
+- 默认用户：`root`（生产环境建议使用专用用户）
+- 详细配置说明：参见 [MYSQL_SETUP.md](MYSQL_SETUP.md)
+
+#### 本地存储
 
 文件存储在本地目录：
 - 上传文件：`storage/uploads/`
 - 输出文件：`storage/outputs/`
 
+配置：
+```properties
+storage.type=local
+storage.save-to-database=true  # 同时保存元数据到数据库
+```
+
 #### 云存储（S3 - 可选）
 
 支持AWS S3云存储，配置方式见 [云存储配置](#云存储配置) 章节。
+
+配置：
+```properties
+storage.type=s3
+storage.save-to-database=true  # 同时保存元数据到数据库
+```
 
 ## ✨ 功能特性
 
@@ -612,9 +672,41 @@ aws.s3.endpoint=https://s3.amazonaws.com
 
 **注意**：S3存储功能已实现但默认未启用，需要时取消注释相关代码并配置参数。
 
+## 💾 数据库功能
+
+项目支持将处理后的文档保存到数据库，支持从数据库查询和下载。
+
+### 快速开始
+
+1. **默认使用H2数据库**（无需配置）：
+   - 数据库文件自动创建在 `./data/docautogen.mv.db`
+   - 可通过 H2 控制台查看：http://localhost:8080/h2-console
+
+2. **使用MySQL/PostgreSQL**（生产环境）：
+   - 在 `pom.xml` 中取消注释对应数据库驱动
+   - 在 `application.properties` 中配置数据库连接
+
+### 主要功能
+
+- ✅ 自动保存处理后的文档到数据库
+- ✅ 支持根据文件名或输出ID查询和下载
+- ✅ 支持文档列表查询（按创建时间排序）
+- ✅ 支持文档删除（同时删除数据库记录和文件）
+- ✅ 支持自动清理旧文档
+
+### 详细说明
+
+参见 [DATABASE.md](DATABASE.md) 文档，包含：
+- 数据库配置说明
+- 表结构说明
+- API接口说明
+- 使用示例
+- 性能优化建议
+
 ## 📚 更多信息
 
 - 技术实现说明：参见 [TECHNICAL.md](TECHNICAL.md)
+- 数据库功能说明：参见 [DATABASE.md](DATABASE.md)
 - 配置文件说明：参见 `src/main/resources/table-config.properties`
 - API文档：启动Web服务后访问 http://localhost:8080
 

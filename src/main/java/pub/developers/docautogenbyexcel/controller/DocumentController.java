@@ -69,7 +69,8 @@ public class DocumentController {
                 "outputId", result.outputId(),
                 "outputFileName", result.outputFileName(),
                 "moduleCount", result.moduleCount(),
-                "downloadUrl", "/api/documents/download/" + result.outputFileName()
+                "downloadUrl", "/api/documents/download/" + result.outputFileName(),
+                "downloadUrlById", "/api/documents/download/id/" + result.outputId()
             ));
             
         } catch (Exception e) {
@@ -83,7 +84,7 @@ public class DocumentController {
     }
 
     /**
-     * 下载处理后的文档
+     * 下载处理后的文档（根据文件名）
      * 
      * GET /api/documents/download/{fileName}
      */
@@ -91,6 +92,37 @@ public class DocumentController {
     public ResponseEntity<?> downloadDocument(@PathVariable String fileName) {
         try {
             byte[] content = documentService.getOutputDocument(fileName);
+            
+            String encodedFileName = URLEncoder.encode(fileName, StandardCharsets.UTF_8)
+                .replaceAll("\\+", "%20");
+            
+            HttpHeaders headers = new HttpHeaders();
+            headers.setContentType(MediaType.APPLICATION_OCTET_STREAM);
+            headers.setContentDisposition(ContentDisposition.attachment()
+                .filename(encodedFileName, StandardCharsets.UTF_8)
+                .build());
+            headers.setContentLength(content.length);
+            
+            return new ResponseEntity<>(content, headers, HttpStatus.OK);
+            
+        } catch (Exception e) {
+            return ResponseEntity.notFound().build();
+        }
+    }
+
+    /**
+     * 下载处理后的文档（根据输出ID）
+     * 
+     * GET /api/documents/download/id/{outputId}
+     */
+    @GetMapping("/download/id/{outputId}")
+    public ResponseEntity<?> downloadDocumentById(@PathVariable String outputId) {
+        try {
+            byte[] content = documentService.getOutputDocumentById(outputId);
+            
+            // 从数据库获取文件名
+            String fileName = outputId + ".docx"; // 默认文件名
+            // 可以进一步优化：从数据库查询实际文件名
             
             String encodedFileName = URLEncoder.encode(fileName, StandardCharsets.UTF_8)
                 .replaceAll("\\+", "%20");
@@ -157,13 +189,31 @@ public class DocumentController {
     }
 
     /**
-     * 删除文档
+     * 删除文档（根据文件名）
      * 
      * DELETE /api/documents/{fileName}
      */
     @DeleteMapping("/{fileName}")
     public ResponseEntity<?> deleteDocument(@PathVariable String fileName) {
         boolean deleted = documentService.deleteDocument(fileName);
+        if (deleted) {
+            return ResponseEntity.ok(Map.of(
+                "success", true,
+                "message", "文档已删除"
+            ));
+        } else {
+            return ResponseEntity.notFound().build();
+        }
+    }
+
+    /**
+     * 删除文档（根据输出ID）
+     * 
+     * DELETE /api/documents/id/{outputId}
+     */
+    @DeleteMapping("/id/{outputId}")
+    public ResponseEntity<?> deleteDocumentById(@PathVariable String outputId) {
+        boolean deleted = documentService.deleteDocumentById(outputId);
         if (deleted) {
             return ResponseEntity.ok(Map.of(
                 "success", true,
