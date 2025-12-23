@@ -1,0 +1,1037 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DocAutoGen - 智能文档填充工具</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@300;400;500;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-primary: #0f0f1a;
+            --bg-secondary: #1a1a2e;
+            --bg-card: #16162a;
+            --accent-primary: #00d9ff;
+            --accent-secondary: #7c3aed;
+            --accent-gradient: linear-gradient(135deg, #00d9ff 0%, #7c3aed 100%);
+            --text-primary: #f0f0f5;
+            --text-secondary: #8b8b9e;
+            --border-color: #2a2a4a;
+            --success: #10b981;
+            --error: #ef4444;
+            --warning: #f59e0b;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Noto Sans SC', -apple-system, BlinkMacSystemFont, sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            min-height: 100vh;
+            overflow-x: hidden;
+        }
+
+        /* Background Effects */
+        .bg-effects {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            z-index: -1;
+            overflow: hidden;
+        }
+
+        .bg-effects::before {
+            content: '';
+            position: absolute;
+            top: -50%;
+            left: -50%;
+            width: 200%;
+            height: 200%;
+            background: radial-gradient(circle at 20% 80%, rgba(0, 217, 255, 0.08) 0%, transparent 50%),
+                        radial-gradient(circle at 80% 20%, rgba(124, 58, 237, 0.08) 0%, transparent 50%),
+                        radial-gradient(circle at 40% 40%, rgba(0, 217, 255, 0.04) 0%, transparent 30%);
+            animation: bgFloat 20s ease-in-out infinite;
+        }
+
+        @keyframes bgFloat {
+            0%, 100% { transform: translate(0, 0) rotate(0deg); }
+            33% { transform: translate(2%, 2%) rotate(1deg); }
+            66% { transform: translate(-1%, 1%) rotate(-1deg); }
+        }
+
+        /* Grid Pattern */
+        .grid-pattern {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-image: 
+                linear-gradient(rgba(0, 217, 255, 0.03) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(0, 217, 255, 0.03) 1px, transparent 1px);
+            background-size: 60px 60px;
+        }
+
+        /* Header */
+        header {
+            background: rgba(22, 22, 42, 0.8);
+            backdrop-filter: blur(20px);
+            border-bottom: 1px solid var(--border-color);
+            padding: 1rem 2rem;
+            position: sticky;
+            top: 0;
+            z-index: 100;
+        }
+
+        .header-content {
+            max-width: 1400px;
+            margin: 0 auto;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .logo {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+        }
+
+        .logo-icon {
+            width: 40px;
+            height: 40px;
+            background: var(--accent-gradient);
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 700;
+            font-size: 1.2rem;
+        }
+
+        .logo-text {
+            font-size: 1.5rem;
+            font-weight: 700;
+            background: var(--accent-gradient);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .logo-subtitle {
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+            margin-top: -4px;
+        }
+
+        /* Main Container */
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 2rem;
+        }
+
+        /* Section Title */
+        .section-title {
+            font-size: 1.5rem;
+            font-weight: 600;
+            margin-bottom: 1.5rem;
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+        }
+
+        .section-title::before {
+            content: '';
+            width: 4px;
+            height: 24px;
+            background: var(--accent-gradient);
+            border-radius: 2px;
+        }
+
+        /* Upload Section */
+        .upload-section {
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: 16px;
+            padding: 2rem;
+            margin-bottom: 2rem;
+        }
+
+        .upload-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 2rem;
+            margin-bottom: 2rem;
+        }
+
+        @media (max-width: 768px) {
+            .upload-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        .upload-zone {
+            border: 2px dashed var(--border-color);
+            border-radius: 12px;
+            padding: 2rem;
+            text-align: center;
+            transition: all 0.3s ease;
+            cursor: pointer;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .upload-zone:hover,
+        .upload-zone.dragover {
+            border-color: var(--accent-primary);
+            background: rgba(0, 217, 255, 0.05);
+        }
+
+        .upload-zone.has-file {
+            border-color: var(--success);
+            background: rgba(16, 185, 129, 0.05);
+        }
+
+        .upload-zone input[type="file"] {
+            display: none;
+        }
+
+        .upload-icon {
+            width: 64px;
+            height: 64px;
+            margin: 0 auto 1rem;
+            background: var(--bg-secondary);
+            border-radius: 16px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 2rem;
+        }
+
+        .upload-zone.excel .upload-icon {
+            color: #10b981;
+        }
+
+        .upload-zone.word .upload-icon {
+            color: #3b82f6;
+        }
+
+        .upload-label {
+            font-size: 1.1rem;
+            font-weight: 500;
+            margin-bottom: 0.5rem;
+        }
+
+        .upload-hint {
+            font-size: 0.875rem;
+            color: var(--text-secondary);
+        }
+
+        .file-name {
+            margin-top: 1rem;
+            padding: 0.5rem 1rem;
+            background: rgba(16, 185, 129, 0.1);
+            border-radius: 8px;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.875rem;
+            color: var(--success);
+            display: none;
+        }
+
+        .upload-zone.has-file .file-name {
+            display: block;
+        }
+
+        /* Submit Button */
+        .submit-container {
+            text-align: center;
+        }
+
+        .submit-btn {
+            padding: 1rem 3rem;
+            font-size: 1.1rem;
+            font-weight: 600;
+            color: var(--bg-primary);
+            background: var(--accent-gradient);
+            border: none;
+            border-radius: 12px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .submit-btn:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 40px rgba(0, 217, 255, 0.3);
+        }
+
+        .submit-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .submit-btn.loading {
+            pointer-events: none;
+        }
+
+        .submit-btn.loading::after {
+            content: '';
+            position: absolute;
+            width: 20px;
+            height: 20px;
+            border: 2px solid transparent;
+            border-top-color: var(--bg-primary);
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+            margin-left: 0.5rem;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        /* Result Section */
+        .result-section {
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: 16px;
+            padding: 2rem;
+            margin-bottom: 2rem;
+            display: none;
+        }
+
+        .result-section.show {
+            display: block;
+            animation: slideIn 0.4s ease;
+        }
+
+        @keyframes slideIn {
+            from {
+                opacity: 0;
+                transform: translateY(20px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .result-success {
+            background: rgba(16, 185, 129, 0.1);
+            border: 1px solid rgba(16, 185, 129, 0.3);
+            border-radius: 12px;
+            padding: 1.5rem;
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+        }
+
+        .result-icon {
+            width: 48px;
+            height: 48px;
+            background: var(--success);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.5rem;
+            flex-shrink: 0;
+        }
+
+        .result-info h3 {
+            font-size: 1.1rem;
+            margin-bottom: 0.25rem;
+        }
+
+        .result-info p {
+            color: var(--text-secondary);
+            font-size: 0.875rem;
+        }
+
+        .result-actions {
+            display: flex;
+            gap: 1rem;
+            margin-top: 1.5rem;
+        }
+
+        .action-btn {
+            flex: 1;
+            padding: 0.875rem 1.5rem;
+            font-size: 0.95rem;
+            font-weight: 500;
+            border-radius: 10px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.5rem;
+            text-decoration: none;
+        }
+
+        .action-btn.primary {
+            background: var(--accent-gradient);
+            color: var(--bg-primary);
+            border: none;
+        }
+
+        .action-btn.secondary {
+            background: transparent;
+            color: var(--text-primary);
+            border: 1px solid var(--border-color);
+        }
+
+        .action-btn:hover {
+            transform: translateY(-2px);
+        }
+
+        /* Documents List */
+        .documents-section {
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: 16px;
+            padding: 2rem;
+        }
+
+        .documents-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1.5rem;
+        }
+
+        .refresh-btn {
+            padding: 0.5rem 1rem;
+            font-size: 0.875rem;
+            color: var(--text-secondary);
+            background: transparent;
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .refresh-btn:hover {
+            color: var(--accent-primary);
+            border-color: var(--accent-primary);
+        }
+
+        .documents-list {
+            display: flex;
+            flex-direction: column;
+            gap: 0.75rem;
+        }
+
+        .document-item {
+            display: flex;
+            align-items: center;
+            padding: 1rem 1.25rem;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: 10px;
+            transition: all 0.3s ease;
+        }
+
+        .document-item:hover {
+            border-color: var(--accent-primary);
+            background: rgba(0, 217, 255, 0.03);
+        }
+
+        .doc-icon {
+            width: 40px;
+            height: 40px;
+            background: rgba(59, 130, 246, 0.1);
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #3b82f6;
+            font-size: 1.25rem;
+            margin-right: 1rem;
+            flex-shrink: 0;
+        }
+
+        .doc-info {
+            flex: 1;
+            min-width: 0;
+        }
+
+        .doc-name {
+            font-weight: 500;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .doc-meta {
+            font-size: 0.8rem;
+            color: var(--text-secondary);
+            margin-top: 0.25rem;
+        }
+
+        .doc-actions {
+            display: flex;
+            gap: 0.5rem;
+        }
+
+        .doc-action-btn {
+            padding: 0.5rem 0.75rem;
+            font-size: 0.8rem;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            border: none;
+            display: flex;
+            align-items: center;
+            gap: 0.25rem;
+        }
+
+        .doc-action-btn.download {
+            background: rgba(16, 185, 129, 0.1);
+            color: var(--success);
+        }
+
+        .doc-action-btn.preview {
+            background: rgba(0, 217, 255, 0.1);
+            color: var(--accent-primary);
+        }
+
+        .doc-action-btn.delete {
+            background: rgba(239, 68, 68, 0.1);
+            color: var(--error);
+        }
+
+        .doc-action-btn:hover {
+            filter: brightness(1.2);
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 3rem 2rem;
+            color: var(--text-secondary);
+        }
+
+        .empty-state-icon {
+            font-size: 3rem;
+            margin-bottom: 1rem;
+            opacity: 0.5;
+        }
+
+        /* Preview Modal */
+        .modal-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.8);
+            backdrop-filter: blur(4px);
+            z-index: 1000;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            padding: 2rem;
+        }
+
+        .modal-overlay.show {
+            display: flex;
+        }
+
+        .modal-content {
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: 16px;
+            width: 100%;
+            max-width: 1000px;
+            max-height: 90vh;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .modal-header {
+            padding: 1.25rem 1.5rem;
+            border-bottom: 1px solid var(--border-color);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .modal-title {
+            font-weight: 600;
+            font-size: 1.1rem;
+        }
+
+        .modal-close {
+            width: 36px;
+            height: 36px;
+            background: transparent;
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            color: var(--text-secondary);
+            cursor: pointer;
+            font-size: 1.25rem;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.2s ease;
+        }
+
+        .modal-close:hover {
+            color: var(--error);
+            border-color: var(--error);
+        }
+
+        .modal-body {
+            flex: 1;
+            overflow: auto;
+            padding: 1.5rem;
+        }
+
+        .preview-frame {
+            width: 100%;
+            height: 70vh;
+            border: none;
+            background: white;
+            border-radius: 8px;
+        }
+
+        .preview-notice {
+            text-align: center;
+            padding: 3rem;
+            color: var(--text-secondary);
+        }
+
+        .preview-notice p {
+            margin-bottom: 1rem;
+        }
+
+        /* Toast Notifications */
+        .toast-container {
+            position: fixed;
+            bottom: 2rem;
+            right: 2rem;
+            z-index: 2000;
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+        }
+
+        .toast {
+            padding: 1rem 1.5rem;
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: 10px;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            animation: toastIn 0.3s ease;
+            min-width: 300px;
+        }
+
+        .toast.success { border-left: 4px solid var(--success); }
+        .toast.error { border-left: 4px solid var(--error); }
+        .toast.warning { border-left: 4px solid var(--warning); }
+
+        @keyframes toastIn {
+            from {
+                opacity: 0;
+                transform: translateX(100%);
+            }
+            to {
+                opacity: 1;
+                transform: translateX(0);
+            }
+        }
+
+        /* Footer */
+        footer {
+            text-align: center;
+            padding: 2rem;
+            color: var(--text-secondary);
+            font-size: 0.875rem;
+        }
+    </style>
+</head>
+<body>
+    <div class="bg-effects">
+        <div class="grid-pattern"></div>
+    </div>
+
+    <header>
+        <div class="header-content">
+            <div class="logo">
+                <div class="logo-icon">D</div>
+                <div>
+                    <div class="logo-text">DocAutoGen</div>
+                    <div class="logo-subtitle">智能文档填充工具</div>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <main class="container">
+        <!-- Upload Section -->
+        <section class="upload-section">
+            <h2 class="section-title">文档处理</h2>
+            
+            <div class="upload-grid">
+                <div class="upload-zone excel" onclick="document.getElementById('excelFile').click()">
+                    <input type="file" id="excelFile" accept=".xlsx,.xls">
+                    <div class="upload-icon">📊</div>
+                    <div class="upload-label">上传 Excel 数据文件</div>
+                    <div class="upload-hint">支持 .xlsx 或 .xls 格式</div>
+                    <div class="file-name" id="excelFileName"></div>
+                </div>
+                
+                <div class="upload-zone word" onclick="document.getElementById('wordFile').click()">
+                    <input type="file" id="wordFile" accept=".docx,.doc">
+                    <div class="upload-icon">📄</div>
+                    <div class="upload-label">上传 Word 模板文件</div>
+                    <div class="upload-hint">支持 .docx 或 .doc 格式</div>
+                    <div class="file-name" id="wordFileName"></div>
+                </div>
+            </div>
+            
+            <div class="submit-container">
+                <button class="submit-btn" id="processBtn" disabled onclick="processDocuments()">
+                    开始处理
+                </button>
+            </div>
+        </section>
+
+        <!-- Result Section -->
+        <section class="result-section" id="resultSection">
+            <h2 class="section-title">处理结果</h2>
+            <div class="result-success">
+                <div class="result-icon">✓</div>
+                <div class="result-info">
+                    <h3 id="resultTitle">处理成功</h3>
+                    <p id="resultMessage">文档已成功生成</p>
+                </div>
+            </div>
+            <div class="result-actions">
+                <a class="action-btn primary" id="downloadBtn" href="#">
+                    <span>⬇</span> 下载文档
+                </a>
+                <button class="action-btn secondary" id="previewBtn" onclick="previewResult()">
+                    <span>👁</span> 在线预览
+                </button>
+            </div>
+        </section>
+
+        <!-- Documents List -->
+        <section class="documents-section">
+            <div class="documents-header">
+                <h2 class="section-title">历史文档</h2>
+                <button class="refresh-btn" onclick="loadDocuments()">🔄 刷新</button>
+            </div>
+            <div class="documents-list" id="documentsList">
+                <div class="empty-state">
+                    <div class="empty-state-icon">📁</div>
+                    <p>暂无历史文档</p>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <footer>
+        <p>DocAutoGen - Excel数据驱动Word文档自动生成工具</p>
+    </footer>
+
+    <!-- Preview Modal -->
+    <div class="modal-overlay" id="previewModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <span class="modal-title" id="previewTitle">文档预览</span>
+                <button class="modal-close" onclick="closePreview()">×</button>
+            </div>
+            <div class="modal-body">
+                <div class="preview-notice" id="previewNotice">
+                    <p>📋 Word文档预览需要下载后使用Office软件打开</p>
+                    <p>或者您可以使用以下在线服务预览：</p>
+                    <a class="action-btn primary" id="googleDocsLink" href="#" target="_blank" style="display: inline-flex; margin-top: 1rem;">
+                        使用 Google Docs 查看
+                    </a>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast Container -->
+    <div class="toast-container" id="toastContainer"></div>
+
+    <script>
+        // State
+        let currentResult = null;
+        
+        // File inputs handling
+        const excelInput = document.getElementById('excelFile');
+        const wordInput = document.getElementById('wordFile');
+        const processBtn = document.getElementById('processBtn');
+
+        excelInput.addEventListener('change', (e) => handleFileSelect(e, 'excel'));
+        wordInput.addEventListener('change', (e) => handleFileSelect(e, 'word'));
+
+        function handleFileSelect(e, type) {
+            const file = e.target.files[0];
+            const zone = e.target.parentElement;
+            const fileNameEl = document.getElementById(type + 'FileName');
+            
+            if (file) {
+                zone.classList.add('has-file');
+                fileNameEl.textContent = file.name;
+            } else {
+                zone.classList.remove('has-file');
+                fileNameEl.textContent = '';
+            }
+            
+            updateProcessButton();
+        }
+
+        function updateProcessButton() {
+            const hasExcel = excelInput.files.length > 0;
+            const hasWord = wordInput.files.length > 0;
+            processBtn.disabled = !(hasExcel && hasWord);
+        }
+
+        // Drag and drop
+        document.querySelectorAll('.upload-zone').forEach(zone => {
+            zone.addEventListener('dragover', (e) => {
+                e.preventDefault();
+                zone.classList.add('dragover');
+            });
+            
+            zone.addEventListener('dragleave', () => {
+                zone.classList.remove('dragover');
+            });
+            
+            zone.addEventListener('drop', (e) => {
+                e.preventDefault();
+                zone.classList.remove('dragover');
+                
+                const file = e.dataTransfer.files[0];
+                if (file) {
+                    const input = zone.querySelector('input[type="file"]');
+                    const dt = new DataTransfer();
+                    dt.items.add(file);
+                    input.files = dt.files;
+                    input.dispatchEvent(new Event('change'));
+                }
+            });
+        });
+
+        // Process documents
+        async function processDocuments() {
+            const excel = excelInput.files[0];
+            const word = wordInput.files[0];
+            
+            if (!excel || !word) {
+                showToast('请选择Excel和Word文件', 'error');
+                return;
+            }
+            
+            processBtn.classList.add('loading');
+            processBtn.textContent = '处理中...';
+            
+            const formData = new FormData();
+            formData.append('excel', excel);
+            formData.append('word', word);
+            
+            try {
+                const response = await fetch('/api/documents/process', {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    currentResult = data;
+                    showResult(data);
+                    showToast('文档处理成功！', 'success');
+                    loadDocuments();
+                } else {
+                    showToast(data.error || '处理失败', 'error');
+                }
+            } catch (error) {
+                showToast('请求失败: ' + error.message, 'error');
+            } finally {
+                processBtn.classList.remove('loading');
+                processBtn.textContent = '开始处理';
+            }
+        }
+
+        function showResult(data) {
+            const section = document.getElementById('resultSection');
+            const title = document.getElementById('resultTitle');
+            const message = document.getElementById('resultMessage');
+            const downloadBtn = document.getElementById('downloadBtn');
+            
+            title.textContent = '处理成功';
+            message.textContent = data.message;
+            downloadBtn.href = data.downloadUrl;
+            downloadBtn.download = data.outputFileName;
+            
+            section.classList.add('show');
+        }
+
+        // Preview
+        function previewResult() {
+            if (!currentResult) return;
+            showPreview(currentResult.outputFileName);
+        }
+
+        function showPreview(fileName) {
+            const modal = document.getElementById('previewModal');
+            const title = document.getElementById('previewTitle');
+            const googleLink = document.getElementById('googleDocsLink');
+            
+            title.textContent = fileName;
+            
+            // Google Docs viewer URL (需要文件可公开访问)
+            // 这里提供下载链接作为替代
+            googleLink.href = '/api/documents/download/' + encodeURIComponent(fileName);
+            googleLink.textContent = '下载文档';
+            
+            modal.classList.add('show');
+        }
+
+        function closePreview() {
+            document.getElementById('previewModal').classList.remove('show');
+        }
+
+        // Documents list
+        async function loadDocuments() {
+            try {
+                const response = await fetch('/api/documents/list');
+                const data = await response.json();
+                
+                const list = document.getElementById('documentsList');
+                
+                if (data.documents && data.documents.length > 0) {
+                    list.innerHTML = data.documents.map(doc => `
+                        <div class="document-item">
+                            <div class="doc-icon">📄</div>
+                            <div class="doc-info">
+                                <div class="doc-name">${escapeHtml(doc.fileName)}</div>
+                                <div class="doc-meta">${formatFileSize(doc.fileSize)} · ${formatDate(doc.createdAt)}</div>
+                            </div>
+                            <div class="doc-actions">
+                                <button class="doc-action-btn preview" onclick="showPreview('${escapeHtml(doc.fileName)}')">
+                                    👁 预览
+                                </button>
+                                <a class="doc-action-btn download" href="/api/documents/download/${encodeURIComponent(doc.fileName)}" download>
+                                    ⬇ 下载
+                                </a>
+                                <button class="doc-action-btn delete" onclick="deleteDocument('${escapeHtml(doc.fileName)}')">
+                                    🗑 删除
+                                </button>
+                            </div>
+                        </div>
+                    `).join('');
+                } else {
+                    list.innerHTML = `
+                        <div class="empty-state">
+                            <div class="empty-state-icon">📁</div>
+                            <p>暂无历史文档</p>
+                        </div>
+                    `;
+                }
+            } catch (error) {
+                console.error('加载文档列表失败:', error);
+            }
+        }
+
+        async function deleteDocument(fileName) {
+            if (!confirm('确定要删除这个文档吗？')) return;
+            
+            try {
+                const response = await fetch('/api/documents/' + encodeURIComponent(fileName), {
+                    method: 'DELETE'
+                });
+                
+                if (response.ok) {
+                    showToast('文档已删除', 'success');
+                    loadDocuments();
+                } else {
+                    showToast('删除失败', 'error');
+                }
+            } catch (error) {
+                showToast('删除失败: ' + error.message, 'error');
+            }
+        }
+
+        // Utilities
+        function formatFileSize(bytes) {
+            if (bytes < 1024) return bytes + ' B';
+            if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+            return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+        }
+
+        function formatDate(dateStr) {
+            try {
+                const date = new Date(dateStr);
+                return date.toLocaleString('zh-CN', {
+                    year: 'numeric',
+                    month: '2-digit',
+                    day: '2-digit',
+                    hour: '2-digit',
+                    minute: '2-digit'
+                });
+            } catch {
+                return dateStr;
+            }
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        function showToast(message, type = 'info') {
+            const container = document.getElementById('toastContainer');
+            const toast = document.createElement('div');
+            toast.className = 'toast ' + type;
+            toast.innerHTML = `<span>${escapeHtml(message)}</span>`;
+            container.appendChild(toast);
+            
+            setTimeout(() => {
+                toast.style.opacity = '0';
+                setTimeout(() => toast.remove(), 300);
+            }, 3000);
+        }
+
+        // Modal close on overlay click
+        document.getElementById('previewModal').addEventListener('click', (e) => {
+            if (e.target.classList.contains('modal-overlay')) {
+                closePreview();
+            }
+        });
+
+        // ESC to close modal
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') {
+                closePreview();
+            }
+        });
+
+        // Initial load
+        loadDocuments();
+    </script>
+</body>
+</html>
+
