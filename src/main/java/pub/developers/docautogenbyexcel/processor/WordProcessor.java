@@ -128,12 +128,6 @@ public class WordProcessor {
              styleName.contains("程序标题"));
     }
     
-    /** 判断是否为 Heading 2（主章节样式） */
-    private static boolean isHeading2Style(String styleId) {
-        return styleId != null && 
-            (styleId.equals("3") || styleId.toLowerCase().contains("heading 2"));
-    }
-    
     /** 判断是否为主章节样式（Heading 1 或 Heading 2） */
     private static boolean isMainSectionStyle(String styleName) {
         return styleName != null && 
@@ -405,15 +399,10 @@ public class WordProcessor {
                 
                 // 找到下一个主章节的位置作为边界（不在其后面插入）
                 XWPFParagraph nextSectionPara = findNextMainSection(document, sectionPara, sectionNumber);
-                int sectionBoundaryIndex = -1;
+                int initialSectionBoundaryIndex = -1;
                 if (nextSectionPara != null) {
-                    for (int idx = 0; idx < body.sizeOfPArray(); idx++) {
-                        if (body.getPArray(idx) == nextSectionPara.getCTP()) {
-                            sectionBoundaryIndex = idx;
-                            break;
-                        }
-                    }
-                    System.out.println("模块" + sectionNumber + "的边界（下一个主章节）位置: " + sectionBoundaryIndex + " (" + nextSectionPara.getText() + ")");
+                    initialSectionBoundaryIndex = findParagraphIndexInBody(body, nextSectionPara.getCTP());
+                    System.out.println("模块" + sectionNumber + "的初始边界（下一个主章节）位置: " + initialSectionBoundaryIndex + " (" + nextSectionPara.getText() + ")");
                 }
                 
                 // 从第一个已存在的子章节提取格式（只提取一次）
@@ -464,7 +453,10 @@ public class WordProcessor {
                         System.out.println("创建子章节: " + subSectionNumber + " " + testCase.getTestName() + "测试");
                         System.out.println("当前插入点: " + currentInsertPoint.getText());
                         
-                        // 检查当前插入点是否超过了章节边界
+                        // 检查当前插入点是否超过了章节边界（每次动态重算，避免边界漂移）
+                        int sectionBoundaryIndex = nextSectionPara != null
+                            ? findParagraphIndexInBody(body, nextSectionPara.getCTP())
+                            : -1;
                         XWPFParagraph actualInsertPoint = currentInsertPoint;
                         if (sectionBoundaryIndex > 0) {
                             int currentIndex = -1;
@@ -513,13 +505,6 @@ public class WordProcessor {
                         // 更新插入点为表格后面（确保下一个子章节在表格后面创建）
                         currentInsertPoint = findInsertPointAfterTable(document, subSectionPara);
                         System.out.println("更新插入点到表格后面: " + currentInsertPoint.getText());
-                        
-                        // 每次插入新内容后，边界位置应该相应增加
-                        // （子章节标题 + Caption + 表格 = 大约3-4个元素）
-                        if (sectionBoundaryIndex > 0) {
-                            sectionBoundaryIndex += 4;  // 预估每个子章节增加4个元素
-                            System.out.println("更新边界位置到: " + sectionBoundaryIndex);
-                        }
                     }
                 }
                 
@@ -1250,13 +1235,35 @@ public class WordProcessor {
     /** 找到下一个主章节（用于确定当前章节的边界） */
     private XWPFParagraph findNextMainSection(XWPFDocument document, XWPFParagraph currentPara, String currentNumber) {
         boolean found = false;
+        int currentLevel = getSectionLevel(currentNumber);
+
         for (XWPFParagraph para : document.getParagraphs()) {
             if (para.getCTP() == currentPara.getCTP()) { found = true; continue; }
             if (!found) continue;
+
             String text = para.getText();
             String style = para.getStyle();
-            if (text != null && !text.trim().isEmpty() && !isTocStyle(style) && isHeading2Style(style)) {
-                System.out.println("找到下一个主章节: " + text.trim());
+
+            if (text == null || text.trim().isEmpty() || isTocStyle(style)) {
+                continue;
+            }
+
+            String trimmed = text.trim();
+            Matcher matcher = SECTION_PATTERN.matcher(trimmed);
+
+            // Prefer number-based boundary detection: same level and greater section number.
+            if (matcher.matches()) {
+                String candidateNumber = matcher.group(1);
+                if (getSectionLevel(candidateNumber) == currentLevel
+                    && compareSectionNumbers(candidateNumber, currentNumber) > 0) {
+                    System.out.println("找到下一个主章节(编号匹配): " + trimmed);
+                    return para;
+                }
+            }
+
+            // Fallback to style-based detection for templates where heading text has no leading number.
+            if (isMainSectionStyle(style)) {
+                System.out.println("找到下一个主章节(样式匹配): " + trimmed);
                 return para;
             }
         }
