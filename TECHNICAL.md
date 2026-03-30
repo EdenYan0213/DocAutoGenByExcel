@@ -1,453 +1,173 @@
-# Excel数据驱动Word文档自动生成工具 - 技术实现说明
+# Excel数据驱动Word文档自动生成工具 - 技术文档（核心代码报告）
 
-## 📋 目录
+## 1. 技术概览与完成度
 
-1. [架构设计](#架构设计)
-2. [核心模块](#核心模块)
-3. [关键技术实现](#关键技术实现)
-4. [数据流程](#数据流程)
-5. [代码结构](#代码结构)
-6. [扩展开发指南](#扩展开发指南)
+本项目采用 **Java + Apache POI + Commons CLI + Spring Boot（测试上下文）** 实现。  
+当前版本主流程已经完整可用：**读取 Excel → 解析模块数据 → 写入 Word 主体章节和测试用例表 → 填充附加表（基本信息/列表型）→ 输出文档**。
+
+从工程实现角度，项目完成度可评估为：**约 85%（核心能力可交付，工程化能力仍有提升空间）**。
 
 ---
 
-## 🏗️ 架构设计
+## 2. 架构与模块边界
 
-### 整体架构
+```text
+ExcelToWordTool (入口编排)
+ ├─ ConfigLoader (参数与配置)
+ ├─ ExcelReader (测试用例Sheet读取与分组)
+ ├─ WordProcessor (章节扫描/子章节/测试用例表处理)
+ ├─ TableDataReader (基本信息与列表型Sheet读取)
+ └─ TableFillProcessor (附加表格填充)
 
-```
-┌─────────────────────┐
-│  ExcelToWordTool    │  主程序入口（命令行解析）
-└──────────┬──────────┘
-           │
-           ├──────────────────────┐
-           │                      │
-    ┌──────▼──────┐      ┌────────▼────────┐
-    │ ExcelReader │      │  WordProcessor   │
-    │ (数据读取)  │      │  (文档处理)      │
-    └──────┬──────┘      └────────┬─────────┘
-           │                      │
-           │                      │
-    ┌──────▼──────┐      ┌────────▼─────────┐
-    │ TableData   │      │  TableFill       │
-    │ Reader      │      │  Processor       │
-    └─────────────┘      └──────────────────┘
-           │                      │
-           │                      │
-    ┌──────▼──────┐      ┌────────▼─────────┐
-    │ TableConfig │      │  XWPFDocument    │
-    │ (配置管理)  │      │  (Apache POI)    │
-    └─────────────┘      └──────────────────┘
+RequirementManager / TraceabilityManager (需求与追溯能力)
+SectionNumberUtil / FileUtil (工具支持)
 ```
 
-### 设计原则
-
-1. **单一职责原则**：每个类只负责一个功能模块
-2. **开闭原则**：对扩展开放，对修改关闭
-3. **依赖倒置**：依赖抽象而非具体实现
-4. **配置驱动**：通过配置文件管理识别规则，避免硬编码
+模块分工上，入口类负责编排，Reader 负责输入解析，Processor 负责文档操作，Manager 负责需求与追溯领域能力。
 
 ---
 
-## 🔧 核心模块
+## 3. 核心处理流程（代码级）
 
-### 1. ExcelReader（Excel数据读取模块）
-
-**职责**：读取Excel文件，解析测试用例数据，并按模块分组
-
-**关键方法**：
-- `readExcel(String excelPath)`: 读取Excel文件，自动搜索包含 `模块编号` 列的Sheet
-
-**实现要点**：
-- 自动识别测试用例Sheet（包含配置的必填列）
-- 支持动态列名，所有列数据都会被读取
-- 按模块编号分组数据
-
-**代码位置**：`src/main/java/pub/developers/docautogenbyexcel/reader/ExcelReader.java`
-
-### 2. TableDataReader（表格数据读取模块）
-
-**职责**：读取基本信息和列表型表格数据
-
-**关键方法**：
-- `readBasicInfo(String excelPath)`: 读取基本信息表格数据
-- `readAllListTableData(String excelPath)`: 读取所有列表型表格数据
-
-**实现要点**：
-- 自动识别基本信息Sheet（列结构：`表格名称 | 字段名 | 字段值`）
-- 自动识别列表型Sheet（第一列为 `表格名称`）
-- 跳过测试用例Sheet（包含 `模块编号` 列）
-
-**代码位置**：`src/main/java/pub/developers/docautogenbyexcel/reader/TableDataReader.java`
-
-### 3. WordProcessor（Word文档处理模块）
-
-**职责**：处理Word模板，生成测试用例表格
-
-**关键方法**：
-- `processWord(String wordPath, String outputPath, Map<String, ModuleData> moduleDataMap)`: 主处理方法
-
-**实现要点**：
-- 自动定位章节位置（通过样式和内容匹配）
-- 自动生成子章节编号（如 `5.2.1`、`5.2.2`）
-- 自动提取并应用模板格式
-- 处理表格插入和Caption更新
-
-**代码位置**：`src/main/java/pub/developers/docautogenbyexcel/processor/WordProcessor.java`
-
-### 4. TableFillProcessor（表格填充处理模块）
-
-**职责**：填充基本信息和列表型表格
-
-**关键方法**：
-- `fillBasicInfoTables(XWPFDocument document, Map<String, BasicInfoData> basicInfoMap)`: 填充基本信息表格
-- `fillListTables(XWPFDocument document, Map<String, ListTableData> listDataMap)`: 填充列表型表格
-
-**实现要点**：
-- 通过Caption匹配表格
-- 通过列名匹配数据列
-- 支持动态行数扩展
-
-**代码位置**：`src/main/java/pub/developers/docautogenbyexcel/processor/TableFillProcessor.java`
-
-### 5. TableConfig（配置管理模块）
-
-**职责**：管理表格识别和填充的配置参数
-
-**关键方法**：
-- `getTestCaseRequiredColumn()`: 获取测试用例Sheet的必填列名
-- `getBasicInfoTableNameColumn()`: 获取基本信息Sheet的表格名称列名
-- `isTestCaseSheet(List<String> headerColumns)`: 判断Sheet是否是测试用例Sheet
-- `isBasicInfoSheet(List<String> headerColumns)`: 判断Sheet是否是基本信息Sheet
-- `isListDataSheet(List<String> headerColumns)`: 判断Sheet是否是列表型Sheet
-
-**实现要点**：
-- 从配置文件读取参数（`table-config.properties`）
-- 支持UTF-8编码
-- 提供默认值
-
-**代码位置**：`src/main/java/pub/developers/docautogenbyexcel/config/TableConfig.java`
-
----
-
-## 🔑 关键技术实现
-
-### 1. Sheet类型自动识别
-
-**实现原理**：
-
-```java
-// 1. 读取Sheet的表头列名
-List<String> headerColumns = new ArrayList<>();
-for (int c = 0; c < headerRow.getLastCellNum(); c++) {
-    String colName = getCellValue(headerRow.getCell(c));
-    headerColumns.add(colName != null ? colName.trim() : "");
-}
-
-// 2. 根据列名判断Sheet类型
-if (headerColumns.contains(config.getTestCaseRequiredColumn())) {
-    // 测试用例Sheet
-} else if (isBasicInfoSheet(headerColumns)) {
-    // 基本信息Sheet
-} else if (isListDataSheet(headerColumns)) {
-    // 列表型Sheet
-}
-```
-
-**优势**：
-- 不依赖Sheet名称，提高灵活性
-- 通过配置文件管理识别规则，易于扩展
-
-### 2. Word文档章节定位
-
-**实现原理**：
-
-```java
-// 1. 从目录（TOC）中提取章节编号和名称
-// 2. 在正文中查找匹配的章节标题
-// 3. 通过样式（Heading 2）确认章节位置
-XWPFParagraph sectionPara = findSectionParagraph(document, moduleNumber);
-```
-
-**关键点**：
-- 区分目录（TOC）和正文内容
-- 通过样式ID识别章节（`2` = Heading 1, `3` = Heading 2, `4` = Heading 3）
-- 支持章节名称匹配（正文中可能没有编号）
-
-### 3. 格式提取和应用
-
-**实现原理**：
-
-```java
-// 1. 从模板段落中提取格式
-SubSectionFormat format = extractSubSectionFormat(templatePara);
-
-// 2. 应用到新生成的段落
-XWPFRun run = paragraph.createRun();
-run.setFontFamily(format.getFontFamily());
-run.setFontSize(format.getFontSize());
-run.setBold(format.isBold());
-```
-
-**关键点**：
-- 从 `XWPFRun` 和 `CTRPr` 中提取格式信息
-- 支持字体、字号、加粗等属性
-- 自动应用模板格式，保持一致性
-
-### 4. 表格Caption匹配
-
-**实现原理**：
-
-```java
-// 1. 遍历文档中的所有段落
-// 2. 查找Caption样式的段落
-// 3. 提取Caption文本并匹配
-if (para.getStyle() != null && para.getStyle().equals("Caption")) {
-    String captionText = para.getText();
-    if (captionText.contains(targetTableName)) {
-        // 找到匹配的表格
-    }
-}
-```
-
-**关键点**：
-- 通过样式ID识别Caption（`11` = Caption）
-- 支持部分匹配（Caption可能包含额外文本）
-- 定位Caption后的表格
-
-### 5. 动态编号生成
-
-**实现原理**：
-
-```java
-// 1. 查找现有子章节的最大编号
-int maxSubSection = findMaxSubSectionNumber(sectionPara);
-
-// 2. 生成新的子章节编号
-String newSubSectionNumber = moduleNumber + "." + (maxSubSection + 1);
-
-// 3. 创建子章节段落
-XWPFParagraph subSectionPara = createSubSectionParagraph(
-    document, afterPara, newSubSectionNumber, testName
-);
-```
-
-**关键点**：
-- 自动计算下一个编号
-- 处理编号格式（如 `5.2.1`、`5.2.2`）
-- 确保编号连续性
-
-### 6. 插入位置管理
-
-**实现原理**：
-
-```java
-// 1. 查找当前章节的最后一个元素（段落或表格）
-XWPFParagraph lastElement = findLastElementInSection(document, sectionPara);
-
-// 2. 查找下一个主章节的边界
-XWPFParagraph nextMainSection = findNextMainSection(document, sectionPara);
-
-// 3. 确保插入位置在边界内
-int insertIndex = calculateInsertIndex(lastElement, nextMainSection);
-```
-
-**关键点**：
-- 准确识别章节边界
-- 避免插入到错误的章节
-- 处理表格和段落的混合结构
-
----
-
-## 📊 数据流程
-
-### 测试用例表格生成流程
-
-```
-Excel文件
-    ↓
-ExcelReader.readExcel()
-    ↓
-Map<模块编号, ModuleData>
-    ↓
-WordProcessor.processWord()
-    ↓
-1. 查找章节位置
-2. 提取模板格式
-3. 生成子章节和表格
-4. 填充数据
-    ↓
-输出Word文档
-```
-
-### 基本信息/列表型表格填充流程
-
-```
-Excel文件
-    ↓
-TableDataReader.readBasicInfo() / readAllListTableData()
-    ↓
-Map<表格名称, BasicInfoData> / Map<表格名称, ListTableData>
-    ↓
-TableFillProcessor.fillBasicInfoTables() / fillListTables()
-    ↓
-1. 查找表格（通过Caption匹配）
-2. 匹配列名
-3. 填充数据
-    ↓
-输出Word文档
+```mermaid
+flowchart TD
+    A[ExcelToWordTool.main] --> B[parseArguments]
+    B --> C[validatePaths]
+    C --> D[ExcelReader.readExcel]
+    D --> E[WordProcessor.processWord]
+    E --> F[TableDataReader.readBasicInfo/readAllListTableData]
+    F --> G[TableFillProcessor.fillBasicInfoTables/fillListTables]
+    G --> H[输出最终docx]
 ```
 
 ---
 
-## 📁 代码结构
+## 4. 核心代码报告（重点类与关键方法）
 
-```
-src/main/java/pub/developers/docautogenbyexcel/
-├── ExcelToWordTool.java          # 主程序入口
-├── config/
-│   ├── ConfigLoader.java         # 配置文件加载器
-│   └── TableConfig.java          # 表格配置管理
-├── model/
-│   ├── ModuleData.java           # 模块数据模型
-│   └── TestCase.java             # 测试用例数据模型
-├── reader/
-│   ├── ExcelReader.java          # Excel数据读取
-│   └── TableDataReader.java      # 表格数据读取
-├── processor/
-│   ├── WordProcessor.java        # Word文档处理
-│   └── TableFillProcessor.java   # 表格填充处理
-└── util/
-    └── FileUtil.java             # 文件工具类
+### 4.1 `ExcelToWordTool`（主入口）
 
-src/main/resources/
-└── table-config.properties       # 表格配置文件
-```
+- 文件：`/home/runner/work/DocAutoGenByExcel/DocAutoGenByExcel/src/main/java/pub/developers/docautogenbyexcel/ExcelToWordTool.java`
+- 关键方法：
+  - `main(String[] args)`：组织完整流程
+  - `parseArguments(String[] args)`：命令行参数与配置文件双模式
+  - `validatePaths(ConfigLoader config)`：输入输出路径校验
+  - `processAdditionalTables(String excelPath, String outputPath)`：二次打开文档并填充附加表
+
+**核心价值**：把“主表处理”和“附加表处理”拆成两段，降低耦合，便于定位问题。
 
 ---
 
-## 🛠️ 扩展开发指南
+### 4.2 `ExcelReader`（测试用例主数据读取）
 
-### 1. 添加新的Sheet类型
+- 文件：`/home/runner/work/DocAutoGenByExcel/DocAutoGenByExcel/src/main/java/pub/developers/docautogenbyexcel/reader/ExcelReader.java`
+- 关键方法：
+  - `readExcel(String excelPath)`：自动扫描所有 Sheet，查找包含 `模块编号` 的测试用例Sheet，并按模块分组
+  - `readTestCase(...)`：将一行映射为 `TestCase`（动态列存入 `columnData`）
 
-**步骤**：
-
-1. 在 `table-config.properties` 中添加配置：
-```properties
-newtype.column.required=必填列名
-```
-
-2. 在 `TableConfig.java` 中添加识别方法：
-```java
-public boolean isNewTypeSheet(List<String> headerColumns) {
-    String requiredColumn = getProperty("newtype.column.required", "默认值");
-    return headerColumns.contains(requiredColumn);
-}
-```
-
-3. 在 `TableDataReader.java` 中添加读取方法：
-```java
-public Map<String, NewTypeData> readNewTypeData(String excelPath) {
-    // 实现读取逻辑
-}
-```
-
-### 2. 添加新的表格填充逻辑
-
-**步骤**：
-
-1. 在 `TableFillProcessor.java` 中添加填充方法：
-```java
-public int fillNewTypeTables(XWPFDocument document, Map<String, NewTypeData> dataMap) {
-    // 实现填充逻辑
-}
-```
-
-2. 在 `ExcelToWordTool.java` 中调用：
-```java
-int newTypeCount = tableFillProcessor.fillNewTypeTables(document, newTypeMap);
-```
-
-### 3. 修改格式提取逻辑
-
-**步骤**：
-
-1. 在 `WordProcessor.java` 中修改 `extractSubSectionFormat` 方法：
-```java
-private SubSectionFormat extractSubSectionFormat(XWPFParagraph para) {
-    // 修改格式提取逻辑
-}
-```
-
-### 4. 添加新的命令行参数
-
-**步骤**：
-
-1. 在 `ExcelToWordTool.java` 的 `parseArguments` 方法中添加选项：
-```java
-options.addOption("newparam", true, "新参数说明");
-```
-
-2. 在 `ConfigLoader.java` 中添加对应的属性：
-```java
-private String newParam;
-
-public String getNewParam() {
-    return newParam;
-}
-```
+**核心逻辑要点**：
+1. 通过配置中的必填列识别测试用例 Sheet，不依赖 sheet 名称
+2. 非空行转换为 `TestCase`
+3. 按 `moduleNumber` 聚合为 `Map<String, ModuleData>`
 
 ---
 
-## 🔍 调试技巧
+### 4.3 `WordProcessor`（文档主引擎）
 
-### 1. 启用调试日志
+- 文件：`/home/runner/work/DocAutoGenByExcel/DocAutoGenByExcel/src/main/java/pub/developers/docautogenbyexcel/processor/WordProcessor.java`
+- 关键方法：
+  - `processWord(...)`：文档处理总入口
+  - `scanSections(...)`：扫描文档可用章节
+  - `scanPlaceholders(...)`：扫描占位符章节
+  - `processSection(...)`：处理单个模块章节，更新或新增子章节、Caption 和表格数据
+  - `createSubSection(...)` / `createCaption(...)` / `insertNewTable(...)`：增量构造文档元素
+  - `fillTableData(...)`：将 `TestCase` 列数据映射到目标表
 
-在 `table-config.properties` 中设置：
-```properties
-debug.enabled=true
-```
-
-### 2. 检查Sheet识别
-
-在 `TableDataReader.java` 中添加日志：
-```java
-System.out.println("检查Sheet: " + sheetName);
-System.out.println("列名: " + headerColumns);
-System.out.println("识别结果: " + isTestCaseSheet(headerColumns));
-```
-
-### 3. 检查Word文档结构
-
-在 `WordProcessor.java` 中添加日志：
-```java
-System.out.println("段落样式: " + para.getStyle());
-System.out.println("段落文本: " + para.getText());
-System.out.println("样式ID: " + para.getCTP().getPPr().getPStyle().getVal());
-```
+**核心价值**：完成复杂的 Word 结构定位与增量写入，是项目“自动生成能力”的关键实现。
 
 ---
 
-## 📝 注意事项
+### 4.4 `TableDataReader`（附加表数据读取）
 
-1. **文件格式**：仅支持 `.docx` 和 `.xlsx` 格式，不支持 `.doc` 和 `.xls`
-2. **编码问题**：配置文件使用UTF-8编码，确保正确读取中文
-3. **样式匹配**：Word模板必须使用标准样式（Heading 2、Heading 3、Caption）
-4. **Caption匹配**：表格Caption必须与Excel中的 `表格名称` 完全匹配
-5. **列名匹配**：列表型表格的列名必须与Word表格的表头列名匹配
+- 文件：`/home/runner/work/DocAutoGenByExcel/DocAutoGenByExcel/src/main/java/pub/developers/docautogenbyexcel/reader/TableDataReader.java`
+- 关键方法：
+  - `readBasicInfo(String excelPath)`：读取键值型表（表格名称/字段名/字段值）
+  - `readAllListTableData(String excelPath)`：读取列表型表数据，自动跳过测试用例sheet和基本信息sheet
 
----
-
-## 📚 相关技术
-
-- **Apache POI**：Java API for Microsoft Office文档处理
-- **XWPFDocument**：POI的Word文档处理类
-- **XSSFWorkbook**：POI的Excel文档处理类
-- **Commons CLI**：命令行参数解析
+**核心价值**：将“主流程测试用例数据”与“补充表格数据”解耦，支持多类型表格统一入口读取。
 
 ---
 
-## 📄 许可证
+### 4.5 `TableFillProcessor`（附加表填充引擎）
 
-本项目采用 MIT 许可证。
+- 文件：`/home/runner/work/DocAutoGenByExcel/DocAutoGenByExcel/src/main/java/pub/developers/docautogenbyexcel/processor/TableFillProcessor.java`
+- 关键方法：
+  - `fillBasicInfoTables(...)`：按 Caption 匹配并填充键值型表
+  - `fillListTables(...)`：按 Caption + 列名匹配填充列表表
+  - `findTableCaption(...)`：在表格前文段中回溯 Caption
+  - `findColumnIndex(...)`：列名模糊匹配
 
+**核心价值**：把 Word 中“非测试用例主表”的通用填表逻辑沉淀成可复用处理器。
+
+---
+
+### 4.6 `RequirementManager` / `TraceabilityManager`（需求与追溯）
+
+- 文件：
+  - `/home/runner/work/DocAutoGenByExcel/DocAutoGenByExcel/src/main/java/pub/developers/docautogenbyexcel/manager/RequirementManager.java`
+  - `/home/runner/work/DocAutoGenByExcel/DocAutoGenByExcel/src/main/java/pub/developers/docautogenbyexcel/manager/TraceabilityManager.java`
+- 关键能力：
+  - 需求树构建与自动分解（`autoDecomposeRequirement`）
+  - 追溯关系建立（`establishTraceability`）
+  - 覆盖率计算（`calculateCoverage`）
+  - 追溯有效性验证（`validateTraceability`）
+
+**核心价值**：在文档生成之外提供“需求工程能力”，提升工具的完整性与可扩展性。
+
+---
+
+## 5. 数据结构设计（核心模型）
+
+- `ModuleData`：模块号 + 对应测试用例集合
+- `TestCase`：主键字段 + 动态列数据（`LinkedHashMap` 保持顺序）
+- `Requirement`：支持父子层级的需求实体
+- `Traceability`：需求与测试用例关联关系
+
+模型设计强调“动态列兼容”和“层级关系清晰”，适配不同模板与业务字段。
+
+---
+
+## 6. 测试与质量现状
+
+当前已有测试：
+
+- `DocAutoGenByExcelApplicationTests`
+- `SectionNumberUtilTest`
+- `RequirementTraceabilityTest`
+
+从现有执行结果看，`mvn test` 可通过，需求/追溯能力与章节编号工具有覆盖。  
+后续可优先补充 `WordProcessor`、`ExcelReader`、`TableFillProcessor` 的更细粒度单元测试。
+
+---
+
+## 7. 关键设计取舍与限制
+
+1. **文件格式限制**：仅 `.xlsx` / `.docx`
+2. **模板依赖样式**：章节和 Caption 识别依赖 Word 样式约定
+3. **错误处理策略**：附加表处理异常当前为警告，不中断主流程
+4. **列名匹配策略**：附加表填充支持模糊匹配，但仍建议保持模板列名规范
+
+---
+
+## 8. 扩展建议（面向后续版本）
+
+1. 为文档处理链路增加结构化日志（阶段、模块号、表名、耗时）
+2. 引入更完善的错误分级与失败报告
+3. 加强核心处理器单元测试和样例回归测试
+4. 支持更多模板定位方式（如书签/标记点）
+
+---
+
+## 9. 结论
+
+项目当前已具备明确的生产可用主链路，能够完成“Excel驱动Word自动生成”的核心目标，  
+并附带需求分解与追溯能力。若补齐测试粒度和工程化日志能力，可进一步提升可维护性与稳定性。
