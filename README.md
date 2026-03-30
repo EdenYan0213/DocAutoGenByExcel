@@ -1,5 +1,24 @@
 # Excel数据驱动Word文档自动生成工具
 
+## ✅ 项目完成度评估（2026-03-30）
+
+基于当前源码结构、现有测试和可运行结果，本项目整体已达到**可用交付状态（约85%）**，其中核心主链路（Excel→Word）已经打通。
+
+### 已完成能力（可直接使用）
+
+- ✅ 命令行入口与配置文件加载（`ExcelToWordTool` + `ConfigLoader`）
+- ✅ 测试用例Sheet自动识别并按模块分组读取（`ExcelReader`）
+- ✅ Word章节扫描、子章节创建、测试用例表格填充（`WordProcessor`）
+- ✅ 基本信息表与列表型表自动匹配和填充（`TableDataReader` + `TableFillProcessor`）
+- ✅ 需求分解、需求树、追溯矩阵、覆盖率计算（`RequirementManager` + `TraceabilityManager`）
+- ✅ 示例程序与测试可运行（`mvn test` 通过）
+
+### 待继续完善（不影响当前主流程可用）
+
+- ⚠️ `WordProcessor` 与 `TableFillProcessor` 以集成行为为主，缺少细粒度单元测试
+- ⚠️ 错误提示以控制台输出为主，缺少结构化日志与分级错误码
+- ⚠️ 仅支持 `.xlsx/.docx`，不支持 `.xls/.doc`
+
 ## 📖 项目简介
 
 本工具是一个基于Excel数据自动填充Word文档的工具，支持：
@@ -9,6 +28,20 @@
 - ✅ **列表型表格填充**：自动填充各种列表型表格（如接口信息、测试环境等）
 - ✅ **智能Sheet识别**：根据Excel内容自动识别Sheet类型，无需固定命名
 - ✅ **格式自适应**：自动提取并应用Word模板的格式
+
+## 🔄 处理流程图（端到端）
+
+```mermaid
+flowchart TD
+    A[启动程序<br/>ExcelToWordTool.main] --> B[解析参数/配置<br/>parseArguments + ConfigLoader]
+    B --> C[校验输入输出路径<br/>validatePaths]
+    C --> D[读取测试用例Sheet<br/>ExcelReader.readExcel]
+    D --> E[按模块分组<br/>Map<String, ModuleData>]
+    E --> F[处理Word主体章节与测试用例表格<br/>WordProcessor.processWord]
+    F --> G[读取附加表格数据<br/>TableDataReader.readBasicInfo/readAllListTableData]
+    G --> H[填充基本信息和列表型表格<br/>TableFillProcessor.fill*]
+    H --> I[写出最终文档<br/>output/*.docx]
+```
 
 ## 🚀 快速开始
 
@@ -160,6 +193,66 @@ debug.enabled=false
 
 ## 📝 使用方法
 
+## 📘 详细使用文档（实操版）
+
+下面给出一套从 0 到 1 的推荐使用流程，适合首次落地。
+
+### 1）准备输入文件
+
+1. 准备 Excel 文件（`.xlsx`）  
+   至少包含一个“测试用例Sheet”，其表头中必须有 `模块编号` 列。
+2. 准备 Word 模板（`.docx`）  
+   模板应包含目标章节（如 `5.2 功能测试`）以及使用 `Caption` 样式的表格标题。
+
+### 2）执行命令
+
+```bash
+java -jar target/DocAutoGenByExcel-0.0.1-SNAPSHOT.jar \
+  -excel "test_data_enhanced.xlsx" \
+  -word "1-XX测试大纲（公开）_副本.docx" \
+  -out "output"
+```
+
+### 3）观察控制台关键输出
+
+- `找到测试用例Sheet: ...`
+- `读取完成（共X条数据，Y个模块，共Z列）`
+- `开始处理Word模板`
+- `填充基本信息表格: N 个 / 填充列表型表格: M 个`
+- `生成成功！输出文件: ...`
+
+### 4）核对输出文档
+
+建议至少核对以下 5 项：
+
+1. 是否生成到 `-out` 指定目录
+2. 每个 `模块编号` 是否都映射到对应章节
+3. 子章节编号（如 `5.2.1`、`5.2.2`）是否连续
+4. Caption 编号和标题是否正确
+5. 基本信息表 / 列表型表是否按列名匹配填充
+
+### 5）配置化运行（批处理推荐）
+
+创建 `config.properties`：
+
+```properties
+excel.path=test_data_enhanced.xlsx
+word.path=1-XX测试大纲（公开）_副本.docx
+output.path=output
+```
+
+执行：
+
+```bash
+java -jar target/DocAutoGenByExcel-0.0.1-SNAPSHOT.jar -config
+```
+
+### 6）常见失败场景与定位顺序（推荐）
+
+1. **先看 Excel 表头**：是否存在 `模块编号` / `表格名称` 等关键列  
+2. **再看 Word 样式**：章节是否是 Heading 样式、表标题是否是 Caption  
+3. **最后看配置**：`table-config.properties` 的列名是否与Excel一致
+
 ### 命令行参数
 
 ```bash
@@ -265,4 +358,3 @@ java -jar target/DocAutoGenByExcel-0.0.1-SNAPSHOT.jar -config
 ## 📄 许可证
 
 本项目采用 MIT 许可证。
-
