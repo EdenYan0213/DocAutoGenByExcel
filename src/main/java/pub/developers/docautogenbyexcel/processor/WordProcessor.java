@@ -440,6 +440,8 @@ public class WordProcessor {
                         CTTbl tableAfterSub = findTableCttblAfterParagraph(body, existingSubSection.getCTP());
                         if (tableAfterSub != null) {
                             XWPFTable table = new XWPFTable(tableAfterSub, document);
+                            // 复用模板中已存在的首个表格时，先清空旧数据，避免遗留占位内容影响填充结果。
+                            clearTableDataColumns(table);
                             fillTableData(table, testCase);
                             System.out.println("子章节" + subSectionNumber + "表格填充完成");
                             
@@ -633,18 +635,65 @@ public class WordProcessor {
         List<XWPFParagraph> paragraphs = document.getParagraphs();
         int idx = findParagraphIndex(paragraphs, subPara);
         if (idx == -1) return;
+        boolean updated = false;
         
         for (int i = idx + 1; i < paragraphs.size() && i < idx + 5; i++) {
             XWPFParagraph para = paragraphs.get(i);
             String style = para.getStyle();
+            String text = para.getText();
+            String trimmedText = text == null ? "" : text.trim();
+            boolean looksLikeCaptionText = trimmedText.startsWith("表");
             if (isCaptionStyle(style)) {
                 String caption = "表" + subNum + " " + testName + "测试";
                 updateCaptionText(para, caption);
                 System.out.println("更新表格标题为: " + caption);
+                updated = true;
                 break;
             }
-            String text = para.getText();
+            // 某些模板的题注段落未使用Caption样式，但文本本身以“表”开头。
+            if (looksLikeCaptionText) {
+                String caption = "表" + subNum + " " + testName + "测试";
+                updateCaptionText(para, caption);
+                System.out.println("更新表格标题为: " + caption);
+                updated = true;
+                break;
+            }
             if (text != null && !text.trim().isEmpty() && isHeadingStyle(style)) break;
+        }
+
+        if (!updated) {
+            // 兜底：按“子章节后的第一个表格”回溯，定位表格前最近的非空段落作为题注。
+            CTBody body = document.getDocument().getBody();
+            CTTbl tableAfterSub = findTableCttblAfterParagraph(body, subPara.getCTP());
+            if (tableAfterSub != null) {
+                org.apache.xmlbeans.XmlCursor cursor = tableAfterSub.newCursor();
+                int scanned = 0;
+                while (scanned < 8 && cursor.toPrevSibling()) {
+                    org.apache.xmlbeans.XmlObject obj = cursor.getObject();
+                    if (obj instanceof CTP ctp) {
+                        XWPFParagraph para = new XWPFParagraph(ctp, document);
+                        String text = para.getText();
+                        String trimmedText = text == null ? "" : text.trim();
+                        if (trimmedText.isEmpty()) {
+                            scanned++;
+                            continue;
+                        }
+                        if (isCaptionStyle(para.getStyle()) || trimmedText.startsWith("表")) {
+                            String caption = "表" + subNum + " " + testName + "测试";
+                            updateCaptionText(para, caption);
+                            System.out.println("更新表格标题为: " + caption);
+                            updated = true;
+                        }
+                        break;
+                    }
+                    scanned++;
+                }
+                cursor.close();
+            }
+        }
+
+        if (!updated) {
+            System.out.println("警告: 未在子章节后找到可更新的表格标题，子章节=" + subNum);
         }
     }
     

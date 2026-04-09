@@ -53,6 +53,7 @@ java -jar target/DocAutoGenByExcel-0.0.1-SNAPSHOT.jar \
 ```
 java -jar target/DocAutoGenByExcel-0.0.1-SNAPSHOT.jar -excel "2号文档完整填充模板.xlsx" -word "2-XX软件配置项测试报告(公开）.docx" -out "output"
 java -jar target/DocAutoGenByExcel-0.0.1-SNAPSHOT.jar -excel "test_data_enhanced2.0.xlsx" -word "1-XX测试大纲（公开）_副本.docx" -out "output"
+java -jar target/DocAutoGenByExcel-0.0.1-SNAPSHOT.jar -excel "2号文档完整填充模板2.0.xlsx" -word "2-XX软件配置项测试报告(公开）.docx" -out "output"
 
 #### 命令行参数说明
 
