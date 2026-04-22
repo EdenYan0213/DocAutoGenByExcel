@@ -31,55 +31,52 @@ public class DocumentController {
      * Content-Type: multipart/form-data
      * 
      * @param excelFile Excel数据文件
-     * @param wordFile Word模板文件
+     * @param wordFile  Word模板文件
      */
     @PostMapping("/process")
     public ResponseEntity<?> processDocuments(
             @RequestParam("excel") MultipartFile excelFile,
             @RequestParam("word") MultipartFile wordFile) {
-        
+
         // 验证文件
         if (excelFile.isEmpty() || wordFile.isEmpty()) {
             return ResponseEntity.badRequest()
-                .body(Map.of("error", "请上传Excel和Word文件"));
+                    .body(Map.of("error", "请上传Excel和Word文件"));
         }
-        
+
         String excelName = excelFile.getOriginalFilename();
         String wordName = wordFile.getOriginalFilename();
-        
+
         if (excelName == null || !excelName.matches(".*\\.xlsx?$")) {
             return ResponseEntity.badRequest()
-                .body(Map.of("error", "请上传有效的Excel文件(.xlsx或.xls)"));
+                    .body(Map.of("error", "请上传有效的Excel文件(.xlsx或.xls)"));
         }
-        
+
         if (wordName == null || !wordName.matches(".*\\.docx?$")) {
             return ResponseEntity.badRequest()
-                .body(Map.of("error", "请上传有效的Word文件(.docx或.doc)"));
+                    .body(Map.of("error", "请上传有效的Word文件(.docx或.doc)"));
         }
-        
+
         try {
             ProcessResult result = documentService.processDocuments(
-                excelFile.getInputStream(), excelName,
-                wordFile.getInputStream(), wordName
-            );
-            
+                    excelFile.getInputStream(), excelName,
+                    wordFile.getInputStream(), wordName);
+
             return ResponseEntity.ok(Map.of(
-                "success", true,
-                "message", result.message(),
-                "outputId", result.outputId(),
-                "outputFileName", result.outputFileName(),
-                "moduleCount", result.moduleCount(),
-                "downloadUrl", "/api/documents/download/" + result.outputFileName(),
-                "downloadUrlById", "/api/documents/download/id/" + result.outputId()
-            ));
-            
+                    "success", true,
+                    "message", result.message(),
+                    "outputId", result.outputId(),
+                    "outputFileName", result.outputFileName(),
+                    "moduleCount", result.moduleCount(),
+                    "downloadUrl", "/api/documents/download/" + result.outputFileName(),
+                    "downloadUrlById", "/api/documents/download/id/" + result.outputId()));
+
         } catch (Exception e) {
             e.printStackTrace();
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                .body(Map.of(
-                    "error", "处理失败: " + e.getMessage(),
-                    "success", false
-                ));
+                    .body(Map.of(
+                            "error", "处理失败: " + e.getMessage(),
+                            "success", false));
         }
     }
 
@@ -92,19 +89,19 @@ public class DocumentController {
     public ResponseEntity<?> downloadDocument(@PathVariable String fileName) {
         try {
             byte[] content = documentService.getOutputDocument(fileName);
-            
+
             String encodedFileName = URLEncoder.encode(fileName, StandardCharsets.UTF_8)
-                .replaceAll("\\+", "%20");
-            
+                    .replaceAll("\\+", "%20");
+
             HttpHeaders headers = new HttpHeaders();
             headers.setContentType(MediaType.APPLICATION_OCTET_STREAM);
             headers.setContentDisposition(ContentDisposition.attachment()
-                .filename(encodedFileName, StandardCharsets.UTF_8)
-                .build());
+                    .filename(encodedFileName, StandardCharsets.UTF_8)
+                    .build());
             headers.setContentLength(content.length);
-            
+
             return new ResponseEntity<>(content, headers, HttpStatus.OK);
-            
+
         } catch (Exception e) {
             return ResponseEntity.notFound().build();
         }
@@ -119,23 +116,23 @@ public class DocumentController {
     public ResponseEntity<?> downloadDocumentById(@PathVariable String outputId) {
         try {
             byte[] content = documentService.getOutputDocumentById(outputId);
-            
-            // 从数据库获取文件名
+
+            // 默认下载文件名
             String fileName = outputId + ".docx"; // 默认文件名
-            // 可以进一步优化：从数据库查询实际文件名
-            
+            // 可进一步优化：根据outputId反查原始文件名
+
             String encodedFileName = URLEncoder.encode(fileName, StandardCharsets.UTF_8)
-                .replaceAll("\\+", "%20");
-            
+                    .replaceAll("\\+", "%20");
+
             HttpHeaders headers = new HttpHeaders();
             headers.setContentType(MediaType.APPLICATION_OCTET_STREAM);
             headers.setContentDisposition(ContentDisposition.attachment()
-                .filename(encodedFileName, StandardCharsets.UTF_8)
-                .build());
+                    .filename(encodedFileName, StandardCharsets.UTF_8)
+                    .build());
             headers.setContentLength(content.length);
-            
+
             return new ResponseEntity<>(content, headers, HttpStatus.OK);
-            
+
         } catch (Exception e) {
             return ResponseEntity.notFound().build();
         }
@@ -150,19 +147,44 @@ public class DocumentController {
     public ResponseEntity<?> previewDocument(@PathVariable String fileName) {
         try {
             byte[] content = documentService.getOutputDocument(fileName);
-            
+
             HttpHeaders headers = new HttpHeaders();
             // 使用适合预览的Content-Type
             headers.setContentType(MediaType.parseMediaType(
-                "application/vnd.openxmlformats-officedocument.wordprocessingml.document"));
+                    "application/vnd.openxmlformats-officedocument.wordprocessingml.document"));
             headers.setContentLength(content.length);
             // 设置为inline以便浏览器预览
             headers.setContentDisposition(ContentDisposition.inline()
-                .filename(fileName, StandardCharsets.UTF_8)
-                .build());
-            
+                    .filename(fileName, StandardCharsets.UTF_8)
+                    .build());
+
             return new ResponseEntity<>(content, headers, HttpStatus.OK);
-            
+
+        } catch (Exception e) {
+            return ResponseEntity.notFound().build();
+        }
+    }
+
+    /**
+     * 预览文档（根据输出ID）
+     *
+     * GET /api/documents/preview/id/{outputId}
+     */
+    @GetMapping("/preview/id/{outputId}")
+    public ResponseEntity<?> previewDocumentById(@PathVariable String outputId) {
+        try {
+            byte[] content = documentService.getOutputDocumentById(outputId);
+
+            HttpHeaders headers = new HttpHeaders();
+            headers.setContentType(MediaType.parseMediaType(
+                    "application/vnd.openxmlformats-officedocument.wordprocessingml.document"));
+            headers.setContentLength(content.length);
+            headers.setContentDisposition(ContentDisposition.inline()
+                    .filename(outputId + ".docx", StandardCharsets.UTF_8)
+                    .build());
+
+            return new ResponseEntity<>(content, headers, HttpStatus.OK);
+
         } catch (Exception e) {
             return ResponseEntity.notFound().build();
         }
@@ -178,13 +200,12 @@ public class DocumentController {
         try {
             List<DocumentInfo> documents = documentService.listOutputDocuments();
             return ResponseEntity.ok(Map.of(
-                "success", true,
-                "documents", documents,
-                "total", documents.size()
-            ));
+                    "success", true,
+                    "documents", documents,
+                    "total", documents.size()));
         } catch (Exception e) {
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                .body(Map.of("error", e.getMessage()));
+                    .body(Map.of("error", e.getMessage()));
         }
     }
 
@@ -198,9 +219,8 @@ public class DocumentController {
         boolean deleted = documentService.deleteDocument(fileName);
         if (deleted) {
             return ResponseEntity.ok(Map.of(
-                "success", true,
-                "message", "文档已删除"
-            ));
+                    "success", true,
+                    "message", "文档已删除"));
         } else {
             return ResponseEntity.notFound().build();
         }
@@ -216,9 +236,8 @@ public class DocumentController {
         boolean deleted = documentService.deleteDocumentById(outputId);
         if (deleted) {
             return ResponseEntity.ok(Map.of(
-                "success", true,
-                "message", "文档已删除"
-            ));
+                    "success", true,
+                    "message", "文档已删除"));
         } else {
             return ResponseEntity.notFound().build();
         }
@@ -234,10 +253,8 @@ public class DocumentController {
             @RequestParam(defaultValue = "7") int daysToKeep) {
         int deletedCount = documentService.cleanupOldFiles(daysToKeep);
         return ResponseEntity.ok(Map.of(
-            "success", true,
-            "deletedCount", deletedCount,
-            "message", "已清理 " + deletedCount + " 个旧文件"
-        ));
+                "success", true,
+                "deletedCount", deletedCount,
+                "message", "已清理 " + deletedCount + " 个旧文件"));
     }
 }
-

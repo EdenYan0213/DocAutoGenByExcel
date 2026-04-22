@@ -1,12 +1,15 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>DocAutoGen - 智能文档填充工具</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@300;400;500;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <link
+        href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@300;400;500;700&family=JetBrains+Mono:wght@400;500&display=swap"
+        rel="stylesheet">
     <style>
         :root {
             --bg-primary: #0f0f1a;
@@ -57,15 +60,25 @@
             width: 200%;
             height: 200%;
             background: radial-gradient(circle at 20% 80%, rgba(0, 217, 255, 0.08) 0%, transparent 50%),
-                        radial-gradient(circle at 80% 20%, rgba(124, 58, 237, 0.08) 0%, transparent 50%),
-                        radial-gradient(circle at 40% 40%, rgba(0, 217, 255, 0.04) 0%, transparent 30%);
+                radial-gradient(circle at 80% 20%, rgba(124, 58, 237, 0.08) 0%, transparent 50%),
+                radial-gradient(circle at 40% 40%, rgba(0, 217, 255, 0.04) 0%, transparent 30%);
             animation: bgFloat 20s ease-in-out infinite;
         }
 
         @keyframes bgFloat {
-            0%, 100% { transform: translate(0, 0) rotate(0deg); }
-            33% { transform: translate(2%, 2%) rotate(1deg); }
-            66% { transform: translate(-1%, 1%) rotate(-1deg); }
+
+            0%,
+            100% {
+                transform: translate(0, 0) rotate(0deg);
+            }
+
+            33% {
+                transform: translate(2%, 2%) rotate(1deg);
+            }
+
+            66% {
+                transform: translate(-1%, 1%) rotate(-1deg);
+            }
         }
 
         /* Grid Pattern */
@@ -75,7 +88,7 @@
             left: 0;
             width: 100%;
             height: 100%;
-            background-image: 
+            background-image:
                 linear-gradient(rgba(0, 217, 255, 0.03) 1px, transparent 1px),
                 linear-gradient(90deg, rgba(0, 217, 255, 0.03) 1px, transparent 1px);
             background-size: 60px 60px;
@@ -298,7 +311,9 @@
         }
 
         @keyframes spin {
-            to { transform: rotate(360deg); }
+            to {
+                transform: rotate(360deg);
+            }
         }
 
         /* Result Section */
@@ -321,6 +336,7 @@
                 opacity: 0;
                 transform: translateY(20px);
             }
+
             to {
                 opacity: 1;
                 transform: translateY(0);
@@ -617,6 +633,38 @@
             margin-bottom: 1rem;
         }
 
+        .preview-rendered {
+            background: #ffffff;
+            color: #1f2937;
+            border-radius: 10px;
+            padding: 1.5rem;
+            line-height: 1.7;
+            box-shadow: inset 0 0 0 1px #e5e7eb;
+        }
+
+        .preview-rendered h1,
+        .preview-rendered h2,
+        .preview-rendered h3,
+        .preview-rendered h4,
+        .preview-rendered h5,
+        .preview-rendered h6 {
+            margin: 1rem 0 0.5rem;
+            color: #111827;
+        }
+
+        .preview-rendered table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 1rem 0;
+        }
+
+        .preview-rendered th,
+        .preview-rendered td {
+            border: 1px solid #d1d5db;
+            padding: 0.5rem;
+            vertical-align: top;
+        }
+
         /* Toast Notifications */
         .toast-container {
             position: fixed;
@@ -641,15 +689,24 @@
             min-width: 300px;
         }
 
-        .toast.success { border-left: 4px solid var(--success); }
-        .toast.error { border-left: 4px solid var(--error); }
-        .toast.warning { border-left: 4px solid var(--warning); }
+        .toast.success {
+            border-left: 4px solid var(--success);
+        }
+
+        .toast.error {
+            border-left: 4px solid var(--error);
+        }
+
+        .toast.warning {
+            border-left: 4px solid var(--warning);
+        }
 
         @keyframes toastIn {
             from {
                 opacity: 0;
                 transform: translateX(100%);
             }
+
             to {
                 opacity: 1;
                 transform: translateX(0);
@@ -665,6 +722,7 @@
         }
     </style>
 </head>
+
 <body>
     <div class="bg-effects">
         <div class="grid-pattern"></div>
@@ -686,7 +744,7 @@
         <!-- Upload Section -->
         <section class="upload-section">
             <h2 class="section-title">文档处理</h2>
-            
+
             <div class="upload-grid">
                 <div class="upload-zone excel" onclick="document.getElementById('excelFile').click()">
                     <input type="file" id="excelFile" accept=".xlsx,.xls">
@@ -695,7 +753,7 @@
                     <div class="upload-hint">支持 .xlsx 或 .xls 格式</div>
                     <div class="file-name" id="excelFileName"></div>
                 </div>
-                
+
                 <div class="upload-zone word" onclick="document.getElementById('wordFile').click()">
                     <input type="file" id="wordFile" accept=".docx,.doc">
                     <div class="upload-icon">📄</div>
@@ -704,7 +762,7 @@
                     <div class="file-name" id="wordFileName"></div>
                 </div>
             </div>
-            
+
             <div class="submit-container">
                 <button class="submit-btn" id="processBtn" disabled onclick="processDocuments()">
                     开始处理
@@ -759,13 +817,18 @@
                 <button class="modal-close" onclick="closePreview()">×</button>
             </div>
             <div class="modal-body">
+                <div class="preview-notice" id="previewLoading" style="display: none;">
+                    <p>正在加载文档预览...</p>
+                </div>
                 <div class="preview-notice" id="previewNotice">
-                    <p>📋 Word文档预览需要下载后使用Office软件打开</p>
-                    <p>或者您可以使用以下在线服务预览：</p>
-                    <a class="action-btn primary" id="googleDocsLink" href="#" target="_blank" style="display: inline-flex; margin-top: 1rem;">
-                        使用 Google Docs 查看
+                    <p>当前无法在浏览器中直接渲染该文档。</p>
+                    <p>请先下载后使用 Office/WPS 打开查看。</p>
+                    <a class="action-btn primary" id="previewDownloadLink" href="#"
+                        style="display: inline-flex; margin-top: 1rem;">
+                        下载文档
                     </a>
                 </div>
+                <div id="previewContent" class="preview-rendered" style="display: none;"></div>
             </div>
         </div>
     </div>
@@ -773,10 +836,11 @@
     <!-- Toast Container -->
     <div class="toast-container" id="toastContainer"></div>
 
+    <script src="https://unpkg.com/mammoth@1.8.0/mammoth.browser.min.js"></script>
     <script>
         // State
         let currentResult = null;
-        
+
         // File inputs handling
         const excelInput = document.getElementById('excelFile');
         const wordInput = document.getElementById('wordFile');
@@ -789,7 +853,7 @@
             const file = e.target.files[0];
             const zone = e.target.parentElement;
             const fileNameEl = document.getElementById(type + 'FileName');
-            
+
             if (file) {
                 zone.classList.add('has-file');
                 fileNameEl.textContent = file.name;
@@ -797,7 +861,7 @@
                 zone.classList.remove('has-file');
                 fileNameEl.textContent = '';
             }
-            
+
             updateProcessButton();
         }
 
@@ -813,15 +877,15 @@
                 e.preventDefault();
                 zone.classList.add('dragover');
             });
-            
+
             zone.addEventListener('dragleave', () => {
                 zone.classList.remove('dragover');
             });
-            
+
             zone.addEventListener('drop', (e) => {
                 e.preventDefault();
                 zone.classList.remove('dragover');
-                
+
                 const file = e.dataTransfer.files[0];
                 if (file) {
                     const input = zone.querySelector('input[type="file"]');
@@ -837,27 +901,27 @@
         async function processDocuments() {
             const excel = excelInput.files[0];
             const word = wordInput.files[0];
-            
+
             if (!excel || !word) {
                 showToast('请选择Excel和Word文件', 'error');
                 return;
             }
-            
+
             processBtn.classList.add('loading');
             processBtn.textContent = '处理中...';
-            
+
             const formData = new FormData();
             formData.append('excel', excel);
             formData.append('word', word);
-            
+
             try {
                 const response = await fetch('/api/documents/process', {
                     method: 'POST',
                     body: formData
                 });
-                
+
                 const data = await response.json();
-                
+
                 if (data.success) {
                     currentResult = data;
                     showResult(data);
@@ -879,34 +943,75 @@
             const title = document.getElementById('resultTitle');
             const message = document.getElementById('resultMessage');
             const downloadBtn = document.getElementById('downloadBtn');
-            
+
             title.textContent = '处理成功';
             message.textContent = data.message;
-            downloadBtn.href = data.downloadUrl;
+            downloadBtn.href = data.downloadUrlById || data.downloadUrl;
             downloadBtn.download = data.outputFileName;
-            
+
             section.classList.add('show');
         }
 
         // Preview
         function previewResult() {
             if (!currentResult) return;
-            showPreview(currentResult.outputFileName);
+            showPreview(currentResult.outputFileName, currentResult.outputId);
         }
 
-        function showPreview(fileName) {
+        function buildDownloadUrl(fileName, outputId) {
+            if (outputId) {
+                return '/api/documents/download/id/' + encodeURIComponent(outputId);
+            }
+            return '/api/documents/download/' + encodeURIComponent(fileName);
+        }
+
+        function buildPreviewUrl(fileName, outputId) {
+            if (outputId) {
+                return '/api/documents/preview/id/' + encodeURIComponent(outputId);
+            }
+            return '/api/documents/preview/' + encodeURIComponent(fileName);
+        }
+
+        async function showPreview(fileName, outputId) {
             const modal = document.getElementById('previewModal');
             const title = document.getElementById('previewTitle');
-            const googleLink = document.getElementById('googleDocsLink');
-            
+            const previewLoading = document.getElementById('previewLoading');
+            const previewNotice = document.getElementById('previewNotice');
+            const previewContent = document.getElementById('previewContent');
+            const previewDownloadLink = document.getElementById('previewDownloadLink');
+            const previewUrl = buildPreviewUrl(fileName, outputId);
+            const downloadUrl = buildDownloadUrl(fileName, outputId);
+
             title.textContent = fileName;
-            
-            // Google Docs viewer URL (需要文件可公开访问)
-            // 这里提供下载链接作为替代
-            googleLink.href = '/api/documents/download/' + encodeURIComponent(fileName);
-            googleLink.textContent = '下载文档';
-            
+            previewDownloadLink.href = downloadUrl;
+
+            previewLoading.style.display = 'block';
+            previewNotice.style.display = 'none';
+            previewContent.style.display = 'none';
+            previewContent.innerHTML = '';
             modal.classList.add('show');
+
+            try {
+                const response = await fetch(previewUrl);
+                if (!response.ok) {
+                    throw new Error('文档预览请求失败');
+                }
+
+                const arrayBuffer = await response.arrayBuffer();
+                const result = await mammoth.convertToHtml({ arrayBuffer });
+                previewContent.innerHTML = result.value || '<p>文档内容为空</p>';
+
+                if (result.messages && result.messages.length > 0) {
+                    console.warn('预览转换提示:', result.messages);
+                }
+
+                previewLoading.style.display = 'none';
+                previewContent.style.display = 'block';
+            } catch (error) {
+                console.error('预览失败:', error);
+                previewLoading.style.display = 'none';
+                previewNotice.style.display = 'block';
+            }
         }
 
         function closePreview() {
@@ -918,9 +1023,9 @@
             try {
                 const response = await fetch('/api/documents/list');
                 const data = await response.json();
-                
+
                 const list = document.getElementById('documentsList');
-                
+
                 if (data.documents && data.documents.length > 0) {
                     list.innerHTML = data.documents.map(doc => `
                         <div class="document-item">
@@ -930,13 +1035,13 @@
                                 <div class="doc-meta">${formatFileSize(doc.fileSize)} · ${formatDate(doc.createdAt)}</div>
                             </div>
                             <div class="doc-actions">
-                                <button class="doc-action-btn preview" onclick="showPreview('${escapeHtml(doc.fileName)}')">
+                                <button class="doc-action-btn preview" onclick="showPreview('${escapeJsSingleQuote(doc.fileName)}', '${escapeJsSingleQuote(doc.id || '')}')">
                                     👁 预览
                                 </button>
-                                <a class="doc-action-btn download" href="/api/documents/download/${encodeURIComponent(doc.fileName)}" download>
+                                <a class="doc-action-btn download" href="${buildDownloadUrl(doc.fileName, doc.id)}" download>
                                     ⬇ 下载
                                 </a>
-                                <button class="doc-action-btn delete" onclick="deleteDocument('${escapeHtml(doc.fileName)}')">
+                                <button class="doc-action-btn delete" onclick="deleteDocument('${escapeJsSingleQuote(doc.fileName)}')">
                                     🗑 删除
                                 </button>
                             </div>
@@ -957,12 +1062,12 @@
 
         async function deleteDocument(fileName) {
             if (!confirm('确定要删除这个文档吗？')) return;
-            
+
             try {
                 const response = await fetch('/api/documents/' + encodeURIComponent(fileName), {
                     method: 'DELETE'
                 });
-                
+
                 if (response.ok) {
                     showToast('文档已删除', 'success');
                     loadDocuments();
@@ -1002,13 +1107,19 @@
             return div.innerHTML;
         }
 
+        function escapeJsSingleQuote(text) {
+            return String(text)
+                .replace(/\\/g, '\\\\')
+                .replace(/'/g, "\\'");
+        }
+
         function showToast(message, type = 'info') {
             const container = document.getElementById('toastContainer');
             const toast = document.createElement('div');
             toast.className = 'toast ' + type;
             toast.innerHTML = `<span>${escapeHtml(message)}</span>`;
             container.appendChild(toast);
-            
+
             setTimeout(() => {
                 toast.style.opacity = '0';
                 setTimeout(() => toast.remove(), 300);
@@ -1033,5 +1144,5 @@
         loadDocuments();
     </script>
 </body>
-</html>
 
+</html>

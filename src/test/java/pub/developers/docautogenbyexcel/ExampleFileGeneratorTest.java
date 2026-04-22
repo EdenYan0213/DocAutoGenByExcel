@@ -155,13 +155,26 @@ public class ExampleFileGeneratorTest {
 
         // 3) 调用 TestRunner 运行工具流程
         System.out.println("Generated files: " + excelPath + " , " + wordPath);
+        long runStartTime = System.currentTimeMillis();
         // 调用 test runner main
         TestRunner.main(new String[0]);
 
-        // 验证输出文件存在
-        File out = Path.of(baseDir, "test_output", "test_result.docx").toFile();
-        if (!out.exists() || out.length() == 0) {
-            throw new Exception("工具未生成输出文件或文件为空: " + out.getAbsolutePath());
+        // 验证输出文件存在（兼容 test_result_时间戳.docx 和 test_result.docx）
+        File outDir = Path.of(baseDir, "test_output").toFile();
+        File[] generatedFiles = outDir.listFiles((dir, name) ->
+                (name.startsWith("test_result_") && name.endsWith(".docx")) || "test_result.docx".equals(name));
+
+        File latestFile = null;
+        if (generatedFiles != null) {
+            for (File file : generatedFiles) {
+                if (file.lastModified() >= runStartTime && (latestFile == null || file.lastModified() > latestFile.lastModified())) {
+                    latestFile = file;
+                }
+            }
+        }
+
+        if (latestFile == null || !latestFile.exists() || latestFile.length() == 0) {
+            throw new Exception("工具未生成输出文件或文件为空: " + Path.of(baseDir, "test_output").toAbsolutePath());
         }
     }
 }

@@ -11,7 +11,6 @@
 - ✅ **格式自适应**：自动提取并应用Word模板的格式
 - ✅ **Web界面**：提供友好的Web界面，支持文件上传、在线预览和下载
 - ✅ **REST API**：提供完整的REST API接口，支持集成到其他系统
-- ✅ **数据库存储**：支持将处理后的文档保存到数据库，支持从数据库查询和下载
 
 ## 🚀 快速开始
 
@@ -517,18 +516,16 @@ debug.enabled=false
 
 ### 存储配置
 
-#### 数据库存储（默认）
+#### 本地存储（默认）
 
-文档内容存储在数据库中（MySQL）：
-- ✅ 数据集中管理，易于备份和迁移
-- ✅ 支持事务，数据一致性好
-- ✅ 支持根据ID或文件名查询和下载
-- ⚠️ 注意：大文件（>10MB）建议使用本地或S3存储
+文件存储在本地目录：
+- 上传文件：`storage/uploads/`
+- 输出文件：`storage/outputs/`
 
-**MySQL配置**：
-- 数据库名：`docautogen`
-- 默认用户：`root`（生产环境建议使用专用用户）
-- 详细配置说明：参见 [MYSQL_SETUP.md](MYSQL_SETUP.md)
+默认配置：
+```properties
+storage.type=local
+```
 
 #### 本地存储
 
@@ -539,7 +536,6 @@ debug.enabled=false
 配置：
 ```properties
 storage.type=local
-storage.save-to-database=true  # 同时保存元数据到数据库
 ```
 
 #### 云存储（S3 - 可选）
@@ -549,7 +545,6 @@ storage.save-to-database=true  # 同时保存元数据到数据库
 配置：
 ```properties
 storage.type=s3
-storage.save-to-database=true  # 同时保存元数据到数据库
 ```
 
 ## ✨ 功能特性
@@ -682,41 +677,9 @@ aws.s3.endpoint=https://s3.amazonaws.com
 
 **注意**：S3存储功能已实现但默认未启用，需要时取消注释相关代码并配置参数。
 
-## 💾 数据库功能
-
-项目支持将处理后的文档保存到数据库，支持从数据库查询和下载。
-
-### 快速开始
-
-1. **默认使用H2数据库**（无需配置）：
-   - 数据库文件自动创建在 `./data/docautogen.mv.db`
-   - 可通过 H2 控制台查看：http://localhost:8080/h2-console
-
-2. **使用MySQL/PostgreSQL**（生产环境）：
-   - 在 `pom.xml` 中取消注释对应数据库驱动
-   - 在 `application.properties` 中配置数据库连接
-
-### 主要功能
-
-- ✅ 自动保存处理后的文档到数据库
-- ✅ 支持根据文件名或输出ID查询和下载
-- ✅ 支持文档列表查询（按创建时间排序）
-- ✅ 支持文档删除（同时删除数据库记录和文件）
-- ✅ 支持自动清理旧文档
-
-### 详细说明
-
-参见 [DATABASE.md](DATABASE.md) 文档，包含：
-- 数据库配置说明
-- 表结构说明
-- API接口说明
-- 使用示例
-- 性能优化建议
-
 ## 📚 更多信息
 
 - 技术实现说明：参见 [TECHNICAL.md](TECHNICAL.md)
-- 数据库功能说明：参见 [DATABASE.md](DATABASE.md)
 - 配置文件说明：参见 `src/main/resources/table-config.properties`
 - API文档：启动Web服务后访问 http://localhost:8080
 
