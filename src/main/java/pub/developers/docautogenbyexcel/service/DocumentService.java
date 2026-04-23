@@ -1,16 +1,13 @@
 package pub.developers.docautogenbyexcel.service;
 
-import org.apache.poi.xwpf.usermodel.XWPFDocument;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
-import pub.developers.docautogenbyexcel.model.ModuleData;
-import pub.developers.docautogenbyexcel.processor.TableFillProcessor;
-import pub.developers.docautogenbyexcel.processor.WordProcessor;
-import pub.developers.docautogenbyexcel.reader.ExcelReader;
-import pub.developers.docautogenbyexcel.reader.TableDataReader;
-import pub.developers.docautogenbyexcel.reader.TableDataReader.BasicInfoData;
-import pub.developers.docautogenbyexcel.reader.TableDataReader.ListTableData;
+import pub.developers.docautogenbyexcel.generator.AbstractDocumentGenerator;
+import pub.developers.docautogenbyexcel.generator.STRGenerator;
+import pub.developers.docautogenbyexcel.generator.STDGenerator;
+import pub.developers.docautogenbyexcel.hub.DataHub;
+import pub.developers.docautogenbyexcel.hub.ExcelDataHub;
 
 import java.io.*;
 import java.nio.file.*;
@@ -77,6 +74,14 @@ public class DocumentService {
      */
     public ProcessResult processDocuments(InputStream excelStream, String excelFileName,
             InputStream wordStream, String wordFileName) throws Exception {
+        return processDocuments(excelStream, excelFileName, wordStream, wordFileName, "STD");
+    }
+
+    /**
+     * 处理上传的Excel和Word文件（支持文档类型选择）
+     */
+    public ProcessResult processDocuments(InputStream excelStream, String excelFileName,
+            InputStream wordStream, String wordFileName, String docType) throws Exception {
         String timestamp = LocalDateTime.now().format(TIMESTAMP_FORMAT);
         String sessionId = UUID.randomUUID().toString().substring(0, 8);
 
@@ -89,16 +94,11 @@ public class DocumentService {
         String outputFileName = baseName + "_" + timestamp + ".docx";
         String outputPath = OUTPUT_DIR + "/" + outputFileName;
 
-        // 读取Excel数据
-        ExcelReader excelReader = new ExcelReader();
-        Map<String, ModuleData> moduleDataMap = excelReader.readExcel(excelPath);
-
-        // 处理Word模板
-        WordProcessor wordProcessor = new WordProcessor();
-        int successCount = wordProcessor.processWord(wordPath, outputPath, moduleDataMap);
-
-        // 处理其他表格
-        processAdditionalTables(excelPath, outputPath);
+        // 基于抽象层执行生成流程：数据中枢 -> 生成引擎 -> 文档构建器
+        DataHub dataHub = new ExcelDataHub();
+        AbstractDocumentGenerator generator = createGenerator(docType, dataHub);
+        AbstractDocumentGenerator.GenerateResult generateResult = generator.generate(excelPath, wordPath, outputPath);
+        int successCount = generateResult.moduleCount();
 
         // 如果使用S3存储，上传到S3
         if ("s3".equals(storageType) && s3StorageService != null) {
@@ -122,6 +122,14 @@ public class DocumentService {
                 "成功处理 " + successCount + " 个模块");
     }
 
+    private AbstractDocumentGenerator createGenerator(String docType, DataHub dataHub) {
+        String normalized = docType == null ? "STD" : docType.trim().toUpperCase(Locale.ROOT);
+        if ("STR".equals(normalized)) {
+            return new STRGenerator(dataHub);
+        }
+        return new STDGenerator(dataHub);
+    }
+
     /**
      * 保存上传的文件
      */
@@ -131,34 +139,6 @@ public class DocumentService {
         Path filePath = Paths.get(UPLOAD_DIR, safeName);
         Files.copy(inputStream, filePath, StandardCopyOption.REPLACE_EXISTING);
         return filePath.toString();
-    }
-
-    /**
-     * 处理其他表格
-     */
-    private void processAdditionalTables(String excelPath, String outputPath) {
-        try {
-            TableDataReader tableReader = new TableDataReader();
-            TableFillProcessor tableFillProcessor = new TableFillProcessor();
-
-            Map<String, BasicInfoData> basicInfoMap = tableReader.readBasicInfo(excelPath);
-            Map<String, ListTableData> allListData = tableReader.readAllListTableData(excelPath);
-
-            if (!basicInfoMap.isEmpty() || !allListData.isEmpty()) {
-                try (FileInputStream fis = new FileInputStream(outputPath);
-                        XWPFDocument document = new XWPFDocument(fis)) {
-
-                    tableFillProcessor.fillBasicInfoTables(document, basicInfoMap);
-                    tableFillProcessor.fillListTables(document, allListData);
-
-                    try (FileOutputStream fos = new FileOutputStream(outputPath)) {
-                        document.write(fos);
-                    }
-                }
-            }
-        } catch (Exception e) {
-            System.out.println("处理其他表格时出现警告: " + e.getMessage());
-        }
     }
 
     /**

@@ -366,8 +366,10 @@ public class TableFillProcessor {
                 String contractContent = firstNonBlank(testCase,
                         "合同指标内容", "合同指标内容（合同）", "合同指标内容(合同)");
                 String testItem = firstNonBlank(testCase, "测试项名称", "测试项");
+                // 读取追踪关系列
+                String traceRelation = firstNonBlank(testCase, "追踪关系", "trace", "追踪");
 
-                if (isBlank(contractNo) && isBlank(contractContent) && isBlank(testItem)) {
+                if (isBlank(contractNo) && isBlank(contractContent) && isBlank(testItem) && isBlank(traceRelation)) {
                     continue;
                 }
 
@@ -375,6 +377,8 @@ public class TableFillProcessor {
                 row.put("合同指标编号", contractNo != null ? contractNo : "");
                 row.put("合同指标内容", contractContent != null ? contractContent : "");
                 row.put("测试项", testItem != null ? testItem : "");
+                // 添加追踪关系列
+                row.put("追踪关系", traceRelation != null ? traceRelation : "");
                 rows.add(row);
             }
         }
@@ -416,8 +420,10 @@ public class TableFillProcessor {
         Integer contractNoCol = findColumnIndex(columnIndexMap, "合同指标编号");
         Integer contractContentCol = findColumnIndex(columnIndexMap, "合同指标内容");
         Integer testItemCol = findColumnIndex(columnIndexMap, "测试项", "测试项名称");
+        // 追踪关系列索引
+        Integer traceRelationCol = findColumnIndex(columnIndexMap, "追踪关系", "trace", "追踪");
 
-        if (serialCol == null && contractNoCol == null && contractContentCol == null && testItemCol == null) {
+        if (serialCol == null && contractNoCol == null && contractContentCol == null && testItemCol == null && traceRelationCol == null) {
             System.out.println("测试项追踪表列头未识别，跳过该表");
             return false;
         }
@@ -427,6 +433,10 @@ public class TableFillProcessor {
         }
         if (contractNoCol != null) {
             normalizeTokenColumnLayout(table, contractNoCol, 1800);
+        }
+        // 追踪关系列宽设置
+        if (traceRelationCol != null) {
+            normalizeTokenColumnLayout(table, traceRelationCol, 3000);
         }
 
         // 清空旧数据行，仅保留表头和一行模板数据行（若存在）
@@ -462,6 +472,10 @@ public class TableFillProcessor {
             }
             if (testItemCol != null) {
                 setCellValueByIndex(row, testItemCol, rowData.getOrDefault("测试项", ""), false, false);
+            }
+            // 填充追踪关系列
+            if (traceRelationCol != null) {
+                setCellValueByIndex(row, traceRelationCol, rowData.getOrDefault("追踪关系", ""), false, false);
             }
         }
 

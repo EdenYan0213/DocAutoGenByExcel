@@ -36,7 +36,8 @@ public class DocumentController {
     @PostMapping("/process")
     public ResponseEntity<?> processDocuments(
             @RequestParam("excel") MultipartFile excelFile,
-            @RequestParam("word") MultipartFile wordFile) {
+            @RequestParam("word") MultipartFile wordFile,
+            @RequestParam(value = "docType", defaultValue = "STD") String docType) {
 
         // 验证文件
         if (excelFile.isEmpty() || wordFile.isEmpty()) {
@@ -60,13 +61,14 @@ public class DocumentController {
         try {
             ProcessResult result = documentService.processDocuments(
                     excelFile.getInputStream(), excelName,
-                    wordFile.getInputStream(), wordName);
+                    wordFile.getInputStream(), wordName, docType);
 
             return ResponseEntity.ok(Map.of(
                     "success", true,
                     "message", result.message(),
                     "outputId", result.outputId(),
                     "outputFileName", result.outputFileName(),
+                    "docType", docType,
                     "moduleCount", result.moduleCount(),
                     "downloadUrl", "/api/documents/download/" + result.outputFileName(),
                     "downloadUrlById", "/api/documents/download/id/" + result.outputId()));
