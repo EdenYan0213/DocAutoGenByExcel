@@ -10,6 +10,7 @@ import pub.developers.docautogenbyexcel.hub.DataHub;
 import pub.developers.docautogenbyexcel.hub.ExcelDataHub;
 
 import java.io.*;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.*;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
@@ -27,6 +28,7 @@ public class DocumentService {
     private static final String STORAGE_DIR = "storage";
     private static final String UPLOAD_DIR = STORAGE_DIR + "/uploads";
     private static final String OUTPUT_DIR = STORAGE_DIR + "/outputs";
+    private static final String PDF_SCRIPT = "scripts/convert_docx_to_pdf.py";
 
     private static final DateTimeFormatter TIMESTAMP_FORMAT = DateTimeFormatter.ofPattern("yyyyMMddHHmmss");
 
@@ -36,7 +38,10 @@ public class DocumentService {
     @Autowired(required = false)
     private S3StorageService s3StorageService;
 
+    private final String pythonCommand;
+
     public DocumentService() {
+        this.pythonCommand = resolvePythonCommand();
         // 确保存储目录存在（仅本地存储需要）
         try {
             Files.createDirectories(Paths.get(UPLOAD_DIR));
@@ -168,6 +173,16 @@ public class DocumentService {
             return Files.readAllBytes(localPath);
         }
         throw new FileNotFoundException("文档不存在: " + outputId);
+    }
+
+    public byte[] getPreviewPdfByFileName(String fileName) throws Exception {
+        byte[] docx = getOutputDocument(fileName);
+        return convertDocxBytesToPdf(docx);
+    }
+
+    public byte[] getPreviewPdfById(String outputId) throws Exception {
+        byte[] docx = getOutputDocumentById(outputId);
+        return convertDocxBytesToPdf(docx);
     }
 
     /**
@@ -326,5 +341,60 @@ public class DocumentService {
             }
         }
         return deletedCount;
+    }
+
+    private byte[] convertDocxBytesToPdf(byte[] docxBytes) throws Exception {
+        Path docxPath = null;
+        Path pdfPath = null;
+        try {
+            docxPath = Files.createTempFile("docautogen_preview_", ".docx");
+            Files.write(docxPath, docxBytes);
+            pdfPath = Files.createTempFile("docautogen_preview_", ".pdf");
+            runPdfConversion(docxPath, pdfPath);
+            return Files.readAllBytes(pdfPath);
+        } finally {
+            if (docxPath != null) {
+                Files.deleteIfExists(docxPath);
+            }
+            if (pdfPath != null) {
+                Files.deleteIfExists(pdfPath);
+            }
+        }
+    }
+
+    private void runPdfConversion(Path docxPath, Path pdfPath) throws Exception {
+        Path scriptPath = Paths.get(PDF_SCRIPT);
+        if (!Files.exists(scriptPath)) {
+            throw new FileNotFoundException("PDF转换脚本不存在: " + scriptPath);
+        }
+
+        ProcessBuilder builder = new ProcessBuilder(
+                pythonCommand,
+                scriptPath.toAbsolutePath().toString(),
+                docxPath.toAbsolutePath().toString(),
+                pdfPath.toAbsolutePath().toString());
+        builder.redirectErrorStream(true);
+        Process process = builder.start();
+
+        String output;
+        try (InputStream input = process.getInputStream()) {
+            output = new String(input.readAllBytes(), StandardCharsets.UTF_8);
+        }
+        int exitCode = process.waitFor();
+        if (exitCode != 0) {
+            throw new IllegalStateException("PDF转换失败: " + output);
+        }
+    }
+
+    private String resolvePythonCommand() {
+        String fromEnv = System.getenv("DOCAUTOGEN_PYTHON");
+        if (fromEnv != null && !fromEnv.isBlank()) {
+            return fromEnv;
+        }
+        Path venvPython = Paths.get(".venv", "Scripts", "python.exe");
+        if (Files.exists(venvPython)) {
+            return venvPython.toString();
+        }
+        return "python";
     }
 }

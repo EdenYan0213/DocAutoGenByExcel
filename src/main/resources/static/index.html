@@ -381,6 +381,56 @@
             margin-top: 1.5rem;
         }
 
+        /* Feature Section */
+        .feature-section {
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: 16px;
+            padding: 2rem;
+            margin-bottom: 2rem;
+        }
+
+        .feature-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+            gap: 1.25rem;
+        }
+
+        .feature-card {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            padding: 1.25rem;
+            display: grid;
+            gap: 0.75rem;
+            transition: all 0.3s ease;
+        }
+
+        .feature-card:hover {
+            border-color: var(--accent-primary);
+            transform: translateY(-2px);
+            box-shadow: 0 12px 30px rgba(0, 217, 255, 0.12);
+        }
+
+        .feature-title {
+            font-size: 1.05rem;
+            font-weight: 600;
+        }
+
+        .feature-desc {
+            color: var(--text-secondary);
+            font-size: 0.9rem;
+        }
+
+        .feature-link {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            color: var(--accent-primary);
+            text-decoration: none;
+            font-weight: 500;
+        }
+
         .action-btn {
             flex: 1;
             padding: 0.875rem 1.5rem;
@@ -787,6 +837,23 @@
                 <button class="action-btn secondary" id="previewBtn" onclick="previewResult()">
                     <span>👁</span> 在线预览
                 </button>
+            </div>
+        </section>
+
+        <!-- Feature Entry Section -->
+        <section class="feature-section">
+            <h2 class="section-title">业务界面入口</h2>
+            <div class="feature-grid">
+                <div class="feature-card">
+                    <div class="feature-title">SRS需求解析确认</div>
+                    <div class="feature-desc">LLM解析 + 校验报告 + 人工编辑后写入Excel中枢。</div>
+                    <a class="feature-link" href="/requirements-confirmation.html" target="_blank">进入界面 →</a>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-title">测试说明文档预览</div>
+                    <div class="feature-desc">查看已生成的STD文档，在线预览并支持下载。</div>
+                    <a class="feature-link" href="/std-preview.html" target="_blank">进入界面 →</a>
+                </div>
             </div>
         </section>
 

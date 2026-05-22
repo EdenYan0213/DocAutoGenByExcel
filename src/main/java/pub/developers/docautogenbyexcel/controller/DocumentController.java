@@ -168,6 +168,28 @@ public class DocumentController {
     }
 
     /**
+     * 预览文档（PDF渲染）
+     *
+     * GET /api/documents/preview/pdf/{fileName}
+     */
+    @GetMapping("/preview/pdf/{fileName}")
+    public ResponseEntity<?> previewDocumentPdf(@PathVariable String fileName) {
+        try {
+            byte[] content = documentService.getPreviewPdfByFileName(fileName);
+            HttpHeaders headers = new HttpHeaders();
+            headers.setContentType(MediaType.APPLICATION_PDF);
+            headers.setContentLength(content.length);
+            headers.setContentDisposition(ContentDisposition.inline()
+                    .filename(fileName.replaceAll("\\.docx?$", ".pdf"), StandardCharsets.UTF_8)
+                    .build());
+            return new ResponseEntity<>(content, headers, HttpStatus.OK);
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(Map.of("error", "PDF预览失败: " + e.getMessage()));
+        }
+    }
+
+    /**
      * 预览文档（根据输出ID）
      *
      * GET /api/documents/preview/id/{outputId}
@@ -189,6 +211,28 @@ public class DocumentController {
 
         } catch (Exception e) {
             return ResponseEntity.notFound().build();
+        }
+    }
+
+    /**
+     * 预览文档（PDF渲染，根据输出ID）
+     *
+     * GET /api/documents/preview/pdf/id/{outputId}
+     */
+    @GetMapping("/preview/pdf/id/{outputId}")
+    public ResponseEntity<?> previewDocumentPdfById(@PathVariable String outputId) {
+        try {
+            byte[] content = documentService.getPreviewPdfById(outputId);
+            HttpHeaders headers = new HttpHeaders();
+            headers.setContentType(MediaType.APPLICATION_PDF);
+            headers.setContentLength(content.length);
+            headers.setContentDisposition(ContentDisposition.inline()
+                    .filename(outputId + ".pdf", StandardCharsets.UTF_8)
+                    .build());
+            return new ResponseEntity<>(content, headers, HttpStatus.OK);
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(Map.of("error", "PDF预览失败: " + e.getMessage()));
         }
     }
 
