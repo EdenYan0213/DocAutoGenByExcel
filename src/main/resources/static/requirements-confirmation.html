@@ -1,0 +1,643 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>SRS需求解析结果确认</title>
+  <style>
+    :root {
+      --bg-1: #f3efe6;
+      --bg-2: #e8f0f6;
+      --ink: #1e1e1e;
+      --muted: #5f6b7a;
+      --panel: #ffffff;
+      --line: #d6d9df;
+      --accent: #1c7c6b;
+      --warn: #c98612;
+      --error: #b3392b;
+      --good: #2c7a3f;
+      --shadow: 0 10px 30px rgba(30, 30, 30, 0.12);
+      --radius: 16px;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      font-family: "Noto Sans SC", "Microsoft YaHei", sans-serif;
+      color: var(--ink);
+      background: radial-gradient(1200px 600px at 10% -10%, #f6d7a9 0%, transparent 60%),
+        radial-gradient(900px 500px at 95% 5%, #b8d6f1 0%, transparent 55%),
+        linear-gradient(160deg, var(--bg-1), var(--bg-2));
+      min-height: 100vh;
+    }
+
+    .page {
+      max-width: 1200px;
+      margin: 28px auto 60px;
+      padding: 0 20px;
+      animation: fadeUp 700ms ease-out both;
+    }
+
+    .header {
+      display: grid;
+      gap: 6px;
+      padding: 20px 24px;
+      background: var(--panel);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      position: relative;
+      overflow: hidden;
+    }
+
+    .header::after {
+      content: "";
+      position: absolute;
+      inset: -40% -10% auto auto;
+      width: 260px;
+      height: 260px;
+      background: conic-gradient(from 120deg, #f4c6a8, #e9f2f7, #b7e1d8, #f4c6a8);
+      opacity: 0.25;
+      border-radius: 50%;
+    }
+
+    .title {
+      font-size: 26px;
+      letter-spacing: 1px;
+    }
+
+    .subtitle {
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    .layout {
+      display: grid;
+      grid-template-columns: 2.2fr 1fr;
+      gap: 18px;
+      margin-top: 18px;
+    }
+
+    .panel {
+      background: var(--panel);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      padding: 18px;
+      animation: fadeUp 900ms ease-out both;
+    }
+
+    .panel h3 {
+      margin: 0 0 12px;
+      font-size: 16px;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 1px;
+    }
+
+    .form-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 12px;
+      margin: 12px 0 16px;
+    }
+
+    .input-card {
+      padding: 10px 12px;
+      border: 1px dashed var(--line);
+      border-radius: 12px;
+      background: #f8f9fb;
+      display: grid;
+      gap: 6px;
+      font-size: 13px;
+      color: var(--muted);
+    }
+
+    .input-card input {
+      font-size: 13px;
+    }
+
+    .table {
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      overflow: hidden;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 14px;
+    }
+
+    thead {
+      background: #f6f7f9;
+      color: var(--muted);
+    }
+
+    th,
+    td {
+      padding: 10px 8px;
+      border-bottom: 1px solid var(--line);
+      vertical-align: top;
+    }
+
+    tbody tr:last-child td {
+      border-bottom: none;
+    }
+
+    tbody tr[data-severity="warning"] {
+      background: rgba(201, 134, 18, 0.08);
+    }
+
+    tbody tr[data-severity="error"] {
+      background: rgba(179, 57, 43, 0.08);
+    }
+
+    tbody tr.selected {
+      outline: 2px solid var(--accent);
+    }
+
+    td[contenteditable] {
+      background: linear-gradient(90deg, rgba(28, 124, 107, 0.08), transparent 60%);
+      border-radius: 6px;
+    }
+
+    .req-id {
+      font-weight: 600;
+      color: #1c4f66;
+    }
+
+    .toolbar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 14px;
+    }
+
+    .btn {
+      border: 1px solid var(--line);
+      background: #fff;
+      padding: 8px 14px;
+      border-radius: 10px;
+      font-size: 13px;
+      cursor: pointer;
+      transition: transform 120ms ease, box-shadow 120ms ease;
+    }
+
+    .btn:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 6px 14px rgba(30, 30, 30, 0.12);
+    }
+
+    .btn.primary {
+      background: var(--accent);
+      color: #fff;
+      border-color: transparent;
+    }
+
+    .btn.danger {
+      background: var(--error);
+      color: #fff;
+      border-color: transparent;
+    }
+
+    .report {
+      display: grid;
+      gap: 12px;
+      font-size: 13px;
+    }
+
+    .report-section {
+      padding: 12px;
+      border-radius: 12px;
+      border: 1px solid var(--line);
+      background: #fafafa;
+    }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-weight: 600;
+    }
+
+    .badge.warning {
+      color: var(--warn);
+    }
+
+    .badge.error {
+      color: var(--error);
+    }
+
+    .badge.good {
+      color: var(--good);
+    }
+
+    .stats {
+      display: grid;
+      gap: 8px;
+      background: #f6f7f9;
+      border-radius: 12px;
+      padding: 12px;
+      border: 1px dashed var(--line);
+    }
+
+    .stats span {
+      display: flex;
+      justify-content: space-between;
+    }
+
+    .footer-bar {
+      margin-top: 18px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 14px;
+      flex-wrap: wrap;
+    }
+
+    .note {
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .result-link {
+      color: var(--accent);
+      font-size: 13px;
+      text-decoration: none;
+    }
+
+    @keyframes fadeUp {
+      from {
+        opacity: 0;
+        transform: translateY(16px);
+      }
+
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+
+    @media (max-width: 980px) {
+      .layout {
+        grid-template-columns: 1fr;
+      }
+
+      .form-row {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+
+<body>
+  <div class="page">
+    <header class="header">
+      <div class="title">SRS需求解析结果确认</div>
+      <div class="subtitle" id="headerSubtitle">项目：未命名项目 · 解析时间：--</div>
+    </header>
+
+    <section class="panel" style="margin-top: 18px;">
+      <h3>解析输入</h3>
+      <div class="form-row">
+        <label class="input-card">
+          <span>项目名称（可选）</span>
+          <input type="text" id="projectName" placeholder="如：某型火控系统" />
+        </label>
+        <label class="input-card">
+          <span>SRS 文档</span>
+          <input type="file" id="srsFile" accept=".docx,.doc" />
+        </label>
+        <label class="input-card">
+          <span>Excel 中枢文件（写入时可选）</span>
+          <input type="file" id="excelFile" accept=".xlsx,.xls" />
+        </label>
+      </div>
+      <div class="toolbar">
+        <button class="btn" id="parseBtn">解析并校验</button>
+        <span class="note" id="parseStatus">等待上传SRS文档</span>
+      </div>
+    </section>
+
+    <section class="layout">
+      <div class="panel">
+        <h3>需求表格操作区</h3>
+        <div class="table">
+          <table>
+            <thead>
+              <tr>
+                <th style="width: 44px;">#</th>
+                <th style="width: 110px;">ReqID</th>
+                <th style="width: 160px;">标题</th>
+                <th>描述</th>
+                <th style="width: 90px;">优先级</th>
+                <th style="width: 110px;">状态</th>
+              </tr>
+            </thead>
+            <tbody id="reqTable">
+              <tr>
+                <td colspan="6" style="text-align: center; color: var(--muted);">等待解析结果</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="toolbar">
+          <button class="btn" id="addRowBtn">+ 新增需求</button>
+          <button class="btn danger" id="deleteRowBtn">删除选中</button>
+          <button class="btn" id="reparseBtn">重新解析</button>
+        </div>
+      </div>
+
+      <aside class="panel">
+        <h3>校验报告面板</h3>
+        <div class="report">
+          <div class="report-section">
+            <div class="badge warning">⚠ 警告信息</div>
+            <ul id="warningList">
+              <li>暂无警告</li>
+            </ul>
+          </div>
+          <div class="report-section">
+            <div class="badge error">❌ 错误信息</div>
+            <ul id="errorList">
+              <li>暂无错误</li>
+            </ul>
+          </div>
+          <div class="report-section">
+            <div class="badge good">✅ 校验通过</div>
+            <ul id="passList">
+              <li>等待解析结果</li>
+            </ul>
+          </div>
+          <div class="stats" id="statsPanel">
+            <span><strong>总提取</strong> 0 条</span>
+            <span><strong>需关注</strong> 0 条</span>
+            <span><strong>错误</strong> 0 条</span>
+            <span><strong>警告</strong> 0 条</span>
+          </div>
+        </div>
+      </aside>
+    </section>
+
+    <div class="footer-bar">
+      <div class="note">提示：问题条目已高亮，点击单元格即可编辑。</div>
+      <div class="toolbar">
+        <button class="btn primary" id="confirmBtn">确认并写入 Excel 中枢</button>
+        <a class="result-link" id="downloadLink" href="#" style="display:none;">下载写入结果</a>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    let parsedRequirements = [];
+    let reportCache = null;
+
+    const parseBtn = document.getElementById('parseBtn');
+    const reparseBtn = document.getElementById('reparseBtn');
+    const addRowBtn = document.getElementById('addRowBtn');
+    const deleteRowBtn = document.getElementById('deleteRowBtn');
+    const confirmBtn = document.getElementById('confirmBtn');
+    const srsFileInput = document.getElementById('srsFile');
+    const excelFileInput = document.getElementById('excelFile');
+    const projectNameInput = document.getElementById('projectName');
+    const headerSubtitle = document.getElementById('headerSubtitle');
+    const parseStatus = document.getElementById('parseStatus');
+    const downloadLink = document.getElementById('downloadLink');
+
+    parseBtn.addEventListener('click', () => runParse());
+    reparseBtn.addEventListener('click', () => runParse());
+    addRowBtn.addEventListener('click', () => addRow());
+    deleteRowBtn.addEventListener('click', () => deleteSelected());
+    confirmBtn.addEventListener('click', () => confirmWrite());
+
+    function setStatus(text) {
+      parseStatus.textContent = text;
+    }
+
+    async function runParse() {
+      const srsFile = srsFileInput.files[0];
+      if (!srsFile) {
+        setStatus('请上传SRS文档');
+        return;
+      }
+      setStatus('解析中...');
+      const formData = new FormData();
+      formData.append('srs', srsFile);
+      if (projectNameInput.value.trim()) {
+        formData.append('projectName', projectNameInput.value.trim());
+      }
+
+      try {
+        const response = await fetch('/api/requirements/parse', {
+          method: 'POST',
+          body: formData
+        });
+        const data = await response.json();
+        if (!data.success) {
+          setStatus(data.error || '解析失败');
+          return;
+        }
+        const payload = data.data;
+        parsedRequirements = payload.requirements || [];
+        reportCache = payload.report || null;
+        updateHeader(payload.projectName, payload.parsedAt);
+        renderTable(parsedRequirements, reportCache);
+        renderReport(reportCache, parsedRequirements.length);
+        setStatus('解析完成');
+      } catch (error) {
+        setStatus('解析失败: ' + error.message);
+      }
+    }
+
+    function updateHeader(projectName, parsedAt) {
+      const time = parsedAt ? parsedAt.replace('T', ' ') : '--';
+      headerSubtitle.textContent = `项目：${projectName || '未命名项目'} · 解析时间：${time}`;
+    }
+
+    function renderTable(requirements, report) {
+      const tbody = document.getElementById('reqTable');
+      if (!requirements || requirements.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="6" style="text-align:center; color: var(--muted);">暂无需求</td></tr>';
+        return;
+      }
+      const severityMap = buildSeverityMap(report);
+      tbody.innerHTML = requirements.map((req, index) => {
+        const severity = severityMap.get(req.reqId) || '';
+        const statusLabel = severity === 'error' ? '❌ 错误' : (severity === 'warning' ? '⚠ 警告' : '✅ 正常');
+        return `
+          <tr data-severity="${severity}">
+            <td>${index + 1}</td>
+            <td class="req-id" contenteditable="true">${escapeHtml(req.reqId || '')}</td>
+            <td contenteditable="true">${escapeHtml(req.title || '')}</td>
+            <td contenteditable="true">${escapeHtml(req.description || '')}</td>
+            <td contenteditable="true">${escapeHtml(req.priority || '中')}</td>
+            <td>${statusLabel}</td>
+          </tr>
+        `;
+      }).join('');
+
+      bindRowSelection();
+    }
+
+    function bindRowSelection() {
+      const rows = document.querySelectorAll('#reqTable tr');
+      rows.forEach((row) => {
+        row.addEventListener('click', () => {
+          rows.forEach((r) => r.classList.remove('selected'));
+          row.classList.add('selected');
+        });
+      });
+    }
+
+    function buildSeverityMap(report) {
+      const map = new Map();
+      if (!report) {
+        return map;
+      }
+      (report.warnings || []).forEach(item => {
+        map.set(item.requirementId, 'warning');
+      });
+      (report.errors || []).forEach(item => {
+        map.set(item.requirementId, 'error');
+      });
+      return map;
+    }
+
+    function renderReport(report, total) {
+      const warningList = document.getElementById('warningList');
+      const errorList = document.getElementById('errorList');
+      const passList = document.getElementById('passList');
+      const statsPanel = document.getElementById('statsPanel');
+
+      const warnings = report?.warnings || [];
+      const errors = report?.errors || [];
+      const passes = report?.passes || [];
+      const stats = report?.stats || {};
+
+      warningList.innerHTML = warnings.length
+        ? warnings.map(w => `<li>${escapeHtml(w.requirementId)} ${escapeHtml(w.message)}（${escapeHtml(w.suggestion || '')}）</li>`).join('')
+        : '<li>暂无警告</li>';
+
+      errorList.innerHTML = errors.length
+        ? errors.map(e => `<li>${escapeHtml(e.requirementId)} ${escapeHtml(e.message)}（${escapeHtml(e.suggestion || '')}）</li>`).join('')
+        : '<li>暂无错误</li>';
+
+      passList.innerHTML = passes.length
+        ? passes.map(p => `<li>${escapeHtml(p)}</li>`).join('')
+        : '<li>等待解析结果</li>';
+
+      statsPanel.innerHTML = `
+        <span><strong>总提取</strong> ${stats.total ?? total} 条</span>
+        <span><strong>需关注</strong> ${stats.attention ?? (warnings.length + errors.length)} 条</span>
+        <span><strong>错误</strong> ${stats.errorCount ?? errors.length} 条</span>
+        <span><strong>警告</strong> ${stats.warningCount ?? warnings.length} 条</span>
+      `;
+    }
+
+    function addRow() {
+      const tbody = document.getElementById('reqTable');
+      const nextId = nextReqId();
+      const rowCount = tbody.querySelectorAll('tr').length;
+      const row = document.createElement('tr');
+      row.innerHTML = `
+        <td>${rowCount + 1}</td>
+        <td class="req-id" contenteditable="true">${nextId}</td>
+        <td contenteditable="true"></td>
+        <td contenteditable="true"></td>
+        <td contenteditable="true">中</td>
+        <td>✅ 正常</td>
+      `;
+      tbody.appendChild(row);
+      bindRowSelection();
+    }
+
+    function deleteSelected() {
+      const selected = document.querySelector('#reqTable tr.selected');
+      if (!selected) {
+        setStatus('请选择要删除的行');
+        return;
+      }
+      selected.remove();
+      reindexRows();
+    }
+
+    function reindexRows() {
+      const rows = document.querySelectorAll('#reqTable tr');
+      rows.forEach((row, idx) => {
+        const indexCell = row.querySelector('td');
+        if (indexCell) {
+          indexCell.textContent = idx + 1;
+        }
+      });
+    }
+
+    async function confirmWrite() {
+      const rows = document.querySelectorAll('#reqTable tr');
+      if (!rows.length) {
+        setStatus('需求列表为空');
+        return;
+      }
+      const requirements = Array.from(rows).map(row => {
+        const cells = row.querySelectorAll('td');
+        return {
+          reqId: cells[1]?.textContent.trim() || '',
+          title: cells[2]?.textContent.trim() || '',
+          description: cells[3]?.textContent.trim() || '',
+          priority: cells[4]?.textContent.trim() || '中'
+        };
+      });
+
+      const formData = new FormData();
+      formData.append('requirements', JSON.stringify(requirements));
+      if (excelFileInput.files[0]) {
+        formData.append('excel', excelFileInput.files[0]);
+      }
+
+      setStatus('写入中...');
+      try {
+        const response = await fetch('/api/requirements/confirm', {
+          method: 'POST',
+          body: formData
+        });
+        const data = await response.json();
+        if (!data.success) {
+          setStatus(data.error || '写入失败');
+          return;
+        }
+        setStatus('写入成功');
+        downloadLink.href = data.downloadUrl;
+        downloadLink.textContent = '下载写入结果：' + data.outputFileName;
+        downloadLink.style.display = 'inline';
+      } catch (error) {
+        setStatus('写入失败: ' + error.message);
+      }
+    }
+
+    function nextReqId() {
+      const ids = Array.from(document.querySelectorAll('#reqTable .req-id'))
+        .map(cell => cell.textContent.trim())
+        .filter(Boolean);
+      let max = 0;
+      ids.forEach(id => {
+        const match = id.match(/REQ-(\d+)/i);
+        if (match) {
+          max = Math.max(max, parseInt(match[1], 10));
+        }
+      });
+      const next = String(max + 1).padStart(3, '0');
+      return `REQ-${next}`;
+    }
+
+    function escapeHtml(text) {
+      const div = document.createElement('div');
+      div.textContent = text;
+      return div.innerHTML;
+    }
+  </script>
+</body>
+
+</html>

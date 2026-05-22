@@ -1,0 +1,309 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>文档生成预览 - 软件测试说明</title>
+  <style>
+    :root {
+      --bg-1: #f2f5ef;
+      --bg-2: #e6eef2;
+      --ink: #1e1e1e;
+      --muted: #5c6775;
+      --panel: #ffffff;
+      --line: #d7dde4;
+      --accent: #1b6f86;
+      --good: #2d7d4e;
+      --shadow: 0 12px 30px rgba(20, 30, 40, 0.14);
+      --radius: 18px;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      font-family: "Source Han Sans SC", "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif;
+      color: var(--ink);
+      background: linear-gradient(150deg, var(--bg-1), var(--bg-2));
+      min-height: 100vh;
+    }
+
+    .page {
+      max-width: 1200px;
+      margin: 28px auto 60px;
+      padding: 0 20px;
+      animation: fadeIn 650ms ease-out both;
+    }
+
+    .header {
+      background: var(--panel);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      padding: 20px 24px;
+      display: grid;
+      gap: 6px;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .header::after {
+      content: "";
+      position: absolute;
+      inset: auto -10% -50% auto;
+      width: 320px;
+      height: 320px;
+      background: radial-gradient(circle at 30% 30%, #d7efe7, #f3f1d0, transparent 70%);
+      opacity: 0.5;
+      border-radius: 50%;
+    }
+
+    .title {
+      font-family: "Source Han Serif SC", "Noto Serif SC", "STSong", serif;
+      font-size: 24px;
+    }
+
+    .meta {
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .preview-shell {
+      margin-top: 18px;
+      display: grid;
+      gap: 18px;
+    }
+
+    .preview {
+      background: var(--panel);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      padding: 20px;
+      animation: fadeUp 800ms ease-out both;
+    }
+
+    .page-frame {
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 18px 20px;
+      background: #fcfcfd;
+      min-height: 520px;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .page-frame::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background-image: linear-gradient(90deg, rgba(220, 228, 236, 0.2) 1px, transparent 1px),
+        linear-gradient(rgba(220, 228, 236, 0.2) 1px, transparent 1px);
+      background-size: 24px 24px;
+      opacity: 0.25;
+      pointer-events: none;
+    }
+
+    .doc {
+      position: relative;
+      z-index: 1;
+      font-size: 14px;
+      line-height: 1.6;
+    }
+
+    .doc h4 {
+      margin: 0 0 6px;
+      font-size: 15px;
+    }
+
+    .doc .section {
+      margin-bottom: 16px;
+    }
+
+    .doc .label {
+      color: var(--muted);
+      font-weight: 600;
+    }
+
+    .matrix {
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      overflow: hidden;
+      margin-top: 8px;
+    }
+
+    .matrix table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+
+    .matrix th,
+    .matrix td {
+      border-bottom: 1px solid var(--line);
+      padding: 6px 8px;
+      text-align: center;
+    }
+
+    .matrix tr:last-child td {
+      border-bottom: none;
+    }
+
+    .status {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 10px;
+      border-radius: 12px;
+      background: rgba(45, 125, 78, 0.12);
+      color: var(--good);
+      font-size: 12px;
+      font-weight: 600;
+    }
+
+    .actions {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      margin-top: 16px;
+      justify-content: flex-end;
+    }
+
+    .btn {
+      border: 1px solid var(--line);
+      background: #fff;
+      padding: 8px 14px;
+      border-radius: 10px;
+      font-size: 13px;
+      cursor: pointer;
+      transition: transform 120ms ease, box-shadow 120ms ease;
+    }
+
+    .btn:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 8px 16px rgba(30, 30, 30, 0.12);
+    }
+
+    .btn.primary {
+      background: var(--accent);
+      color: #fff;
+      border-color: transparent;
+    }
+
+    .footer {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    @keyframes fadeIn {
+      from {
+        opacity: 0;
+      }
+
+      to {
+        opacity: 1;
+      }
+    }
+
+    @keyframes fadeUp {
+      from {
+        opacity: 0;
+        transform: translateY(12px);
+      }
+
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+  </style>
+</head>
+
+<body>
+  <div class="page">
+    <header class="header">
+      <div class="title">文档生成预览 - 软件测试说明 (STD)</div>
+      <div class="meta">项目：某型火控系统 · 生成时间：2026-05-07 15:20 · 模板：GJB438C_STD_Template_v1.2.docx</div>
+    </header>
+
+    <section class="preview-shell">
+      <div class="preview">
+        <div class="page-frame">
+          <div class="doc">
+            <div class="section">
+              <h4>3. 测试用例与预期结果</h4>
+              <div><strong>3.1 TC-001 用户登录成功测试</strong></div>
+              <div><span class="label">前置条件：</span>用户已注册且未登录</div>
+              <div><span class="label">测试步骤：</span></div>
+              <ol>
+                <li>打开登录页面</li>
+                <li>输入用户名 "test"</li>
+                <li>输入密码 "********"</li>
+                <li>点击登录按钮</li>
+              </ol>
+              <div><span class="label">预期结果：</span>系统跳转至主页面，显示欢迎信息</div>
+            </div>
+            <div class="section">
+              <div><strong>3.2 TC-002 权限管理测试</strong></div>
+              <div>...</div>
+            </div>
+            <div class="section">
+              <div><strong>需求-测试用例追溯矩阵</strong></div>
+              <div class="matrix">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>需求ID</th>
+                      <th>TC-1</th>
+                      <th>TC-10</th>
+                      <th>TC-12</th>
+                      <th>TC-14</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr>
+                      <td>REQ-001</td>
+                      <td>×</td>
+                      <td></td>
+                      <td>×</td>
+                      <td></td>
+                    </tr>
+                    <tr>
+                      <td>REQ-002</td>
+                      <td></td>
+                      <td>×</td>
+                      <td></td>
+                      <td></td>
+                    </tr>
+                    <tr>
+                      <td>REQ-003</td>
+                      <td></td>
+                      <td></td>
+                      <td>×</td>
+                      <td>×</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="footer">
+          <div class="status">✅ 生成完成 | 12 个测试用例 | 耗时 1.2s</div>
+          <div class="actions">
+            <button class="btn primary">下载 .docx</button>
+            <button class="btn">重新生成</button>
+          </div>
+        </div>
+      </div>
+    </section>
+  </div>
+</body>
+
+</html>
