@@ -88,7 +88,8 @@ public class ExcelReader {
             }
             
             if (sheet == null) {
-                throw new Exception("未找到包含'" + requiredColumn + "'列的Sheet，请确保Excel中有测试用例数据");
+                System.out.println("未找到包含'" + requiredColumn + "'列的Sheet，跳过测试用例处理（将只处理基本信息、列表型表格等）");
+                return moduleDataMap; // 返回空的Map，继续处理其他类型的表格
             }
 
             // 读取数据行
@@ -123,12 +124,99 @@ public class ExcelReader {
                 dataCount++;
             }
 
+            // 读取测试步骤Sheet并关联到TestCase
+            readTestSteps(workbook, moduleDataMap);
+            
             System.out.println("读取完成（共" + dataCount + "条数据，" + moduleDataMap.size() + "个模块，共" + columnNames.size() + "列）");
             return moduleDataMap;
 
         } catch (IOException e) {
             throw new Exception("读取Excel文件失败: " + e.getMessage(), e);
         }
+    }
+    
+    /** 读取测试步骤Sheet并关联到TestCase */
+    private void readTestSteps(Workbook workbook, Map<String, ModuleData> moduleDataMap) {
+        // 查找测试步骤Sheet
+        Sheet stepsSheet = null;
+        for (int i = 0; i < workbook.getNumberOfSheets(); i++) {
+            String name = workbook.getSheetName(i);
+            if (name.contains("测试步骤") || name.toLowerCase().contains("step")) {
+                stepsSheet = workbook.getSheetAt(i);
+                break;
+            }
+        }
+        if (stepsSheet == null || stepsSheet.getPhysicalNumberOfRows() < 2) return;
+        
+        // 读取表头
+        Row header = stepsSheet.getRow(0);
+        Map<String, Integer> colMap = new HashMap<>();
+        for (int i = 0; i < header.getLastCellNum(); i++) {
+            String val = getCellValueAsString(header.getCell(i));
+            if (val != null) colMap.put(val.trim(), i);
+        }
+        
+        // 必须包含这些列
+        Integer idCol = findColumn(colMap, "测试用例标识", "用例标识", "标识", "ID");
+        Integer stepNoCol = findColumn(colMap, "步骤序号", "序号", "StepNo");
+        Integer actionCol = findColumn(colMap, "测试步骤", "步骤", "操作", "输入及操作", "Action");
+        Integer expectedCol = findColumn(colMap, "预期结果", "期望结果", "期望结果与评估标准", "Expected");
+        Integer resultCol = findColumn(colMap, "实测结果", "测试结果", "Result");
+        
+        if (idCol == null || actionCol == null) {
+            System.out.println("测试步骤Sheet缺少必要列（测试用例标识、测试步骤），跳过");
+            return;
+        }
+        
+        // 建立测试用例标识 -> TestCase 的映射
+        Map<String, TestCase> caseMap = new HashMap<>();
+        for (ModuleData module : moduleDataMap.values()) {
+            for (TestCase tc : module.getTestCases()) {
+                String caseId = tc.getColumnValue("测试用例标识");
+                if (caseId == null || caseId.isEmpty()) caseId = tc.getColumnValue("标识");
+                if (caseId != null && !caseId.isEmpty()) caseMap.put(caseId, tc);
+            }
+        }
+        
+        // 读取测试步骤数据
+        int stepCount = 0;
+        for (int i = 1; i < stepsSheet.getPhysicalNumberOfRows(); i++) {
+            Row row = stepsSheet.getRow(i);
+            if (row == null || isRowEmpty(row)) continue;
+            
+            String caseId = getCellValueAsString(row.getCell(idCol));
+            if (caseId == null || caseId.isEmpty()) continue;
+            
+            TestCase tc = caseMap.get(caseId.trim());
+            if (tc == null) continue;
+            
+            int stepNo = 0;
+            if (stepNoCol != null) {
+                String stepNoStr = getCellValueAsString(row.getCell(stepNoCol));
+                try { stepNo = Integer.parseInt(stepNoStr); } catch (Exception e) { stepNo = tc.getTestSteps().size() + 1; }
+            } else {
+                stepNo = tc.getTestSteps().size() + 1;
+            }
+            
+            String action = getCellValueAsString(row.getCell(actionCol));
+            String expected = expectedCol != null ? getCellValueAsString(row.getCell(expectedCol)) : "";
+            String result = resultCol != null ? getCellValueAsString(row.getCell(resultCol)) : "";
+            
+            tc.addTestStep(stepNo, action != null ? action : "", expected != null ? expected : "", result != null ? result : "");
+            stepCount++;
+        }
+        
+        if (stepCount > 0) {
+            System.out.println("读取测试步骤: " + stepCount + " 条");
+        }
+    }
+    
+    /** 在多个可能的列名中查找 */
+    private Integer findColumn(Map<String, Integer> colMap, String... names) {
+        for (String name : names) {
+            if (colMap.containsKey(name)) return colMap.get(name);
+        }
+        return null;
     }
 
     /**
