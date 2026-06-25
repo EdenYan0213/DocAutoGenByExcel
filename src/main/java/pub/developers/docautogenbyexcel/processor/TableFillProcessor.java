@@ -7,6 +7,7 @@ import pub.developers.docautogenbyexcel.reader.TableDataReader.BasicInfoData;
 import pub.developers.docautogenbyexcel.reader.TableDataReader.ListTableData;
 import org.openxmlformats.schemas.wordprocessingml.x2006.main.CTTcPr;
 import org.openxmlformats.schemas.wordprocessingml.x2006.main.STTblWidth;
+import org.openxmlformats.schemas.wordprocessingml.x2006.main.CTR;
 
 import java.util.*;
 import java.util.regex.Matcher;
@@ -649,7 +650,67 @@ public class TableFillProcessor {
         return null;
     }
 
-    /** 设置单元格文本（设置黑色字体） */
+    /** 从底层XML获取rPr的sz值（half-pt），返回-1表示未设置 */
+    private int getSzFromRun(CTR ctr) {
+        try {
+            org.w3c.dom.Element ctrElem = (org.w3c.dom.Element) ctr.getDomNode();
+            org.w3c.dom.NodeList rPrList = ctrElem.getElementsByTagNameNS("*", "rPr");
+            if (rPrList != null && rPrList.getLength() > 0) {
+                org.w3c.dom.Element rPr = (org.w3c.dom.Element) rPrList.item(0);
+                org.w3c.dom.NodeList szList = rPr.getElementsByTagNameNS("*", "sz");
+                if (szList != null && szList.getLength() > 0) {
+                    String val = ((org.w3c.dom.Element) szList.item(0)).getAttribute("w:val");
+                    if ((val == null || val.isEmpty())) {
+                        val = ((org.w3c.dom.Element) szList.item(0)).getAttribute("val");
+                    }
+                    if (val != null && !val.isEmpty()) {
+                        return Integer.parseInt(val);
+                    }
+                }
+            }
+        } catch (Exception ignored) {}
+        return -1;
+    }
+
+    private static final String NS_WORD = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
+
+    /** 在底层XML中设置run的sz和szCs为指定half-pt值 */
+    private void setSzInRun(CTR ctr, int halfPt) {
+        try {
+            org.w3c.dom.Element ctrElem = (org.w3c.dom.Element) ctr.getDomNode();
+            org.w3c.dom.NodeList rPrList = ctrElem.getElementsByTagNameNS(NS_WORD, "rPr");
+            org.w3c.dom.Element rPr;
+            if (rPrList != null && rPrList.getLength() > 0) {
+                rPr = (org.w3c.dom.Element) rPrList.item(0);
+            } else {
+                rPr = ctrElem.getOwnerDocument().createElementNS(NS_WORD, "w:rPr");
+                ctrElem.insertBefore(rPr, ctrElem.getFirstChild());
+            }
+            String valStr = String.valueOf(halfPt);
+            // 设置sz
+            org.w3c.dom.NodeList szList = rPr.getElementsByTagNameNS(NS_WORD, "sz");
+            org.w3c.dom.Element szElem;
+            if (szList != null && szList.getLength() > 0) {
+                szElem = (org.w3c.dom.Element) szList.item(0);
+            } else {
+                szElem = rPr.getOwnerDocument().createElementNS(NS_WORD, "w:sz");
+                rPr.insertBefore(szElem, rPr.getFirstChild());
+            }
+            szElem.setAttributeNS(NS_WORD, "w:val", valStr);
+            // 设置szCs
+            org.w3c.dom.NodeList szCsList = rPr.getElementsByTagNameNS(NS_WORD, "szCs");
+            org.w3c.dom.Element szCsElem;
+            if (szCsList != null && szCsList.getLength() > 0) {
+                szCsElem = (org.w3c.dom.Element) szCsList.item(0);
+            } else {
+                szCsElem = rPr.getOwnerDocument().createElementNS(NS_WORD, "w:szCs");
+                rPr.appendChild(szCsElem);
+            }
+            szCsElem.setAttributeNS(NS_WORD, "w:val", valStr);
+        } catch (Exception ignored) {}
+    }
+
+    /** 设置单元格文本 —— 复用模板run只替换文本，完保留格式 */
     private void setCellText(XWPFTableCell cell, String text) {
         if (cell == null || text == null)
             return;
@@ -661,12 +722,78 @@ public class TableFillProcessor {
             cell.addParagraph();
 
         XWPFParagraph para = cell.getParagraphs().get(0);
-        while (!para.getRuns().isEmpty())
-            para.removeRun(0);
 
-        // 添加新文本并设置黑色字体
-        XWPFRun run = para.createRun();
-        run.setText(text);
-        run.setColor("000000"); // 设置字体颜色为黑色
+        if (!para.getRuns().isEmpty()) {
+            XWPFRun run = para.getRuns().get(0);
+            CTR ctr = run.getCTR();
+            
+            try {
+                org.w3c.dom.Element ctrElem = (org.w3c.dom.Element) ctr.getDomNode();
+                while (ctrElem.getFirstChild() != null) {
+                    ctrElem.removeChild(ctrElem.getFirstChild());
+                }
+                org.w3c.dom.Element rPr = ctrElem.getOwnerDocument().createElementNS(NS_WORD, "w:rPr");
+                ctrElem.appendChild(rPr);
+                if (text != null && !containsChinese(text)) {
+                    org.w3c.dom.Element rf = ctrElem.getOwnerDocument().createElementNS(NS_WORD, "w:rFonts");
+                    rf.setAttributeNS(NS_WORD, "w:ascii", "Times New Roman");
+                    rf.setAttributeNS(NS_WORD, "w:hAnsi", "Times New Roman");
+                    rf.setAttributeNS(NS_WORD, "w:cs", "Times New Roman");
+                    rPr.appendChild(rf);
+                }
+                org.w3c.dom.Element sz = ctrElem.getOwnerDocument().createElementNS(NS_WORD, "w:sz");
+                sz.setAttributeNS(NS_WORD, "w:val", "21");
+                rPr.appendChild(sz);
+                org.w3c.dom.Element szCs = ctrElem.getOwnerDocument().createElementNS(NS_WORD, "w:szCs");
+                szCs.setAttributeNS(NS_WORD, "w:val", "21");
+                rPr.appendChild(szCs);
+                org.w3c.dom.Element t = ctrElem.getOwnerDocument().createElementNS(NS_WORD, "w:t");
+                t.setTextContent(text != null ? text : "");
+                ctrElem.appendChild(t);
+            } catch (Exception e) {
+                while (!para.getRuns().isEmpty()) para.removeRun(0);
+                XWPFRun newRun = para.createRun();
+                newRun.setText(text != null ? text : "");
+            }
+            
+            while (para.getRuns().size() > 1) {
+                para.removeRun(para.getRuns().size() - 1);
+            }
+        } else {
+            XWPFRun run = para.createRun();
+            run.setText(text);
+            run.setColor("000000");
+            setSzInRun(run.getCTR(), 21);
+        }
+    }
+
+    /** 判断字符串是否包含中文 */
+    private boolean containsChinese(String text) {
+        return text.codePoints().anyMatch(cp -> Character.UnicodeScript.of(cp) == Character.UnicodeScript.HAN);
+    }
+
+    /** 在底层XML中设置run的ascii/hAnsi字体 */
+    private void setFontInRun(CTR ctr, String fontName) {
+        try {
+            org.w3c.dom.Element ctrElem = (org.w3c.dom.Element) ctr.getDomNode();
+            org.w3c.dom.NodeList rPrList = ctrElem.getElementsByTagNameNS(NS_WORD, "rPr");
+            org.w3c.dom.Element rPr;
+            if (rPrList != null && rPrList.getLength() > 0) {
+                rPr = (org.w3c.dom.Element) rPrList.item(0);
+            } else {
+                rPr = ctrElem.getOwnerDocument().createElementNS(NS_WORD, "w:rPr");
+                ctrElem.insertBefore(rPr, ctrElem.getFirstChild());
+            }
+            org.w3c.dom.NodeList fontsList = rPr.getElementsByTagNameNS(NS_WORD, "rFonts");
+            org.w3c.dom.Element rFonts;
+            if (fontsList != null && fontsList.getLength() > 0) {
+                rFonts = (org.w3c.dom.Element) fontsList.item(0);
+            } else {
+                rFonts = rPr.getOwnerDocument().createElementNS(NS_WORD, "w:rFonts");
+                rPr.insertBefore(rFonts, rPr.getFirstChild());
+            }
+            rFonts.setAttributeNS(NS_WORD, "w:ascii", fontName);
+            rFonts.setAttributeNS(NS_WORD, "w:hAnsi", fontName);
+        } catch (Exception ignored) {}
     }
 }

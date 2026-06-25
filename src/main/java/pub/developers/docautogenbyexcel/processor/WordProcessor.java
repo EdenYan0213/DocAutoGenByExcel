@@ -457,8 +457,8 @@ public class WordProcessor {
                         CTTbl tableAfterSub = findTableCttblAfterParagraph(body, existingSubSection.getCTP());
                         if (tableAfterSub != null) {
                             XWPFTable table = new XWPFTable(tableAfterSub, document);
-                            // 复用模板中已存在的首个表格时，先清空旧数据，避免遗留占位内容影响填充结果。
-                            clearTableDataColumns(table);
+                            // 不再调用 clearTableDataColumns：避免清掉模板占位默认值（如 XX、2021.08.15）。
+                            // Excel 缺失数据时由 fillCellByLabel 跳过覆盖，保留模板默认值。
                             fillTableData(table, testCase);
                             System.out.println("子章节" + subSectionNumber + "表格填充完成");
                             
@@ -510,7 +510,7 @@ public class WordProcessor {
                             if (newCttbl != null) {
                                 XWPFTable newTable = new XWPFTable(newCttbl, document);
                                 System.out.println("模板表格复制成功，行数: " + newTable.getNumberOfRows());
-                                clearTableDataColumns(newTable);
+                                // 不再预清空数据列：fillCellByLabel会在Excel空值时跳过覆盖，保留模板默认值
                                 fillTableData(newTable, testCase);
                                 System.out.println("表格数据填充完成");
                             } else {
@@ -548,6 +548,9 @@ public class WordProcessor {
 
             // 更新目录（TOC）：同步正文标题变化到目录
             updateTableOfContents(document);
+
+            // 最后修正：强制非中文数据的字体为Times New Roman
+            fixNonChineseFonts(document);
 
             // 保存文档
             try (FileOutputStream fos = new FileOutputStream(outputPath)) {
@@ -1174,7 +1177,7 @@ public class WordProcessor {
             if (newCttbl != null) {
                 XWPFTable newTable = new XWPFTable(newCttbl, document);
                 System.out.println("模板表格复制成功，行数: " + newTable.getNumberOfRows());
-                clearTableDataColumns(newTable);
+                // 不再预清空数据列：fillCellByLabel会在Excel空值时跳过覆盖，保留模板默认值
                 fillTableData(newTable, testCase);
                 System.out.println("表格数据填充完成");
             } else {
@@ -1224,12 +1227,8 @@ public class WordProcessor {
                     CTTc newCell = newRow.addNewTc();
                     if (srcCell.getTcPr() != null) newCell.setTcPr((CTTcPr) srcCell.getTcPr().copy());
                     
-                    // 复制标签列(第0列)、第一行的特定列、或完整的列头行
-                    if (j == 0 || (i == 0 && j == 2) || isHeaderRow) {
-                        copyCellContent(srcCell, newCell);
-                    } else {
-                        newCell.addNewP();
-                    }
+                    // 完整复制所有单元格内容：fillCellByLabel会在Excel空值时跳过覆盖，保留模板默认值
+                    copyCellContent(srcCell, newCell);
                 }
             }
             
@@ -1639,17 +1638,23 @@ public class WordProcessor {
         return -1;
     }
     
-    /** 根据标签单元格查找并填充数据单元格 */
+    /** 根据标签单元格查找并填充数据单元格。
+     *  注意：Excel 缺失数据时跳过覆盖，保留模板单元格中的默认占位值（如 XX、2021.08.15）。
+     *  TestCase.getColumnValue 对缺失列返回空串 ""，此处据此判断而非覆盖。 */
     private void fillCellByLabel(XWPFTableRow row, int labelIdx, int dataIdx, TestCase testCase, java.util.Set<String> cols) {
         String label = getCellText(row.getCell(labelIdx)).trim();
         String match = findMatchingColumn(label, cols);
         if (match != null) {
-            setCellValue(row.getCell(dataIdx), testCase.getColumnValue(match));
+            String value = testCase.getColumnValue(match);
+            if (value == null || value.trim().isEmpty()) {
+                return;  // Excel 未提供数据，保留模板默认值
+            }
+            setCellValue(row.getCell(dataIdx), value);
         }
     }
     
     /** 清空表格的数据列（保留标签列和列头行，通用方法） */
-    private void clearTableDataColumns(XWPFTable table) {
+    private void clearTableDataColumnsExceptFirstRow(XWPFTable table) {
         for (int i = 0; i < table.getNumberOfRows(); i++) {
                 XWPFTableRow row = table.getRow(i);
             if (row == null) continue;
@@ -1708,7 +1713,7 @@ public class WordProcessor {
         aliases.put("测试用例标识", new String[]{"用例标识", "标识", "ID", "编号", "用例编号"});
         aliases.put("测试项名称", new String[]{"测试项", "名称", "用例名称", "测试名称"});
         aliases.put("设计人员", new String[]{"设计者", "编写人", "作者", "创建人"});
-        aliases.put("设计日期", new String[]{"创建日期", "编写日期", "日期"});
+        aliases.put("设计日期", new String[]{"创建日期", "编写日期", "日期", "测试日期"});
         aliases.put("需求追踪", new String[]{"追溯", "追踪", "需求", "关联需求", "追溯合同"});
         aliases.put("测试用例综述", new String[]{"综述", "描述", "说明", "概述", "用例描述"});
         aliases.put("前提和约束", new String[]{"前提", "约束", "前置条件", "先决条件"});
@@ -1721,11 +1726,25 @@ public class WordProcessor {
         
         for (var entry : aliases.entrySet()) {
             String colName = entry.getKey();
-            if (!cols.contains(colName)) continue;
-            for (String alias : entry.getValue()) {
-                if (cleanLabel.contains(alias.replace(" ", "")) || 
-                    alias.replace(" ", "").contains(cleanLabel)) {
-                    return colName;
+            if (cols.contains(colName)) {
+                // 正向：标签包含别名 → 返回规范列名
+                for (String alias : entry.getValue()) {
+                    if (cleanLabel.contains(alias.replace(" ", "")) || 
+                        alias.replace(" ", "").contains(cleanLabel)) {
+                        return colName;
+                    }
+                }
+            } else {
+                // 反向：Excel列名可能是别名，尝试将cols中的每一列与规范名匹配
+                for (String col : cols) {
+                    String cleanCol = col.replace(" ", "").replace("　", "").replace("\t", "");
+                    if (colName.equals(cleanCol)) return col;
+                    for (String alias : entry.getValue()) {
+                        String cleanAlias = alias.replace(" ", "").replace("　", "").replace("\t", "");
+                        if (cleanCol.equals(cleanAlias) || cleanCol.contains(cleanAlias) || cleanAlias.contains(cleanCol)) {
+                            return col;
+                        }
+                    }
                 }
             }
         }
@@ -1741,32 +1760,241 @@ public class WordProcessor {
         return sb.toString().trim();
     }
     
-    /** 设置单元格值（黑色字体，保持原有格式） */
+    /** 从底层XML获取rPr的sz值（half-pt），返回-1表示未设置 */
+    private int getSzFromRun(CTR ctr) {
+        try {
+            org.w3c.dom.Element ctrElem = (org.w3c.dom.Element) ctr.getDomNode();
+            org.w3c.dom.NodeList rPrList = ctrElem.getElementsByTagNameNS("*", "rPr");
+            if (rPrList != null && rPrList.getLength() > 0) {
+                org.w3c.dom.Element rPr = (org.w3c.dom.Element) rPrList.item(0);
+                org.w3c.dom.NodeList szList = rPr.getElementsByTagNameNS("*", "sz");
+                if (szList != null && szList.getLength() > 0) {
+                    String val = ((org.w3c.dom.Element) szList.item(0)).getAttribute("w:val");
+                    if ((val == null || val.isEmpty())) {
+                        val = ((org.w3c.dom.Element) szList.item(0)).getAttribute("val");
+                    }
+                    if (val != null && !val.isEmpty()) {
+                        return Integer.parseInt(val);
+                    }
+                }
+            }
+        } catch (Exception ignored) {}
+        return -1;
+    }
+
+    /** 在底层XML中设置run的sz和szCs（使用localName匹配避免命名空间前缀问题） */
+    private void setSzInRun(CTR ctr, int halfPt) {
+        try {
+            org.w3c.dom.Element ctrElem = (org.w3c.dom.Element) ctr.getDomNode();
+            // 找到rPr（按localName匹配）
+            org.w3c.dom.NodeList children = ctrElem.getChildNodes();
+            org.w3c.dom.Element rPr = null;
+            for (int i = 0; i < children.getLength(); i++) {
+                if ("rPr".equals(children.item(i).getLocalName())) {
+                    rPr = (org.w3c.dom.Element) children.item(i);
+                    break;
+                }
+            }
+            if (rPr == null) {
+                rPr = ctrElem.getOwnerDocument().createElementNS(NS_WORD, "w:rPr");
+                ctrElem.insertBefore(rPr, ctrElem.getFirstChild());
+            }
+            String valStr = String.valueOf(halfPt);
+            // 设置sz（按localName匹配）
+            org.w3c.dom.Element szElem = findOrCreateChild(rPr, "sz", "w:sz");
+            szElem.setAttributeNS(NS_WORD, "w:val", valStr);
+            // 设置szCs
+            org.w3c.dom.Element szCsElem = findOrCreateChild(rPr, "szCs", "w:szCs");
+            szCsElem.setAttributeNS(NS_WORD, "w:val", valStr);
+        } catch (Exception ignored) {}
+    }
+
+    /** 在父元素中按localName查找子元素，不存在则创建 */
+    private org.w3c.dom.Element findOrCreateChild(org.w3c.dom.Element parent, String localName, String qualifiedName) {
+        org.w3c.dom.NodeList children = parent.getChildNodes();
+        for (int i = 0; i < children.getLength(); i++) {
+            if (localName.equals(children.item(i).getLocalName())) {
+                return (org.w3c.dom.Element) children.item(i);
+            }
+        }
+        org.w3c.dom.Element newElem = parent.getOwnerDocument().createElementNS(NS_WORD, qualifiedName);
+        parent.appendChild(newElem);
+        return newElem;
+    }
+
+    private static final String NS_WORD = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
+
+    /** 在底层XML中设置run的ascii/hAnsi字体（通过序列化方式确保生效） */
+    private void setFontInRun(CTR ctr, String fontName) {
+        try {
+            // 确保rPr存在
+            if (!ctr.isSetRPr()) {
+                ctr.addNewRPr();
+            }
+            // 通过底层XML直接设置（使用ooxml-schemas的CTRPr XML结构）
+            // 注意：POI 5.x的CTRPr接口可能没有getRFonts，需要用XmlObject方式
+            org.w3c.dom.Element ctrElem = (org.w3c.dom.Element) ctr.getDomNode();
+            org.w3c.dom.NodeList rPrList = ctrElem.getElementsByTagNameNS(NS_WORD, "rPr");
+            if (rPrList == null || rPrList.getLength() == 0) return;
+            org.w3c.dom.Element rPr = (org.w3c.dom.Element) rPrList.item(0);
+            
+            // 查找或创建rFonts元素
+            org.w3c.dom.NodeList fontsList = rPr.getElementsByTagNameNS(NS_WORD, "rFonts");
+            org.w3c.dom.Element rFonts;
+            if (fontsList != null && fontsList.getLength() > 0) {
+                rFonts = (org.w3c.dom.Element) fontsList.item(0);
+            } else {
+                rFonts = ctrElem.getOwnerDocument().createElementNS(NS_WORD, "w:rFonts");
+                // 插入到rPr的最前面（在sz等属性之前）
+                if (rPr.getFirstChild() != null) {
+                    rPr.insertBefore(rFonts, rPr.getFirstChild());
+                } else {
+                    rPr.appendChild(rFonts);
+                }
+            }
+            rFonts.setAttributeNS(NS_WORD, "w:ascii", fontName);
+            rFonts.setAttributeNS(NS_WORD, "w:hAnsi", fontName);
+        } catch (Exception ignored) {}
+    }
+
+    /** 设置单元格值 —— 复用模板run只替换文本，完保留格式 */
     private void setCellValue(XWPFTableCell cell, String value) {
         if (cell == null) return;
         
         XWPFParagraph para;
         
         if (!cell.getParagraphs().isEmpty()) {
-            // 使用第一个已有段落（保留其格式）
             para = cell.getParagraphs().get(0);
-            // 清除现有的文本run
-            while (!para.getRuns().isEmpty()) {
-                para.removeRun(0);
-            }
-            // 删除多余段落
-            while (cell.getParagraphs().size() > 1) {
-                cell.removeParagraph(cell.getParagraphs().size() - 1);
-            }
         } else {
-            // 没有段落则创建新的
             para = cell.addParagraph();
         }
         
-        // 设置文本
-        XWPFRun run = para.createRun();
-        run.setText(value != null ? value : "");
-        run.setColor("000000");
+        // 删除多余段落
+        while (cell.getParagraphs().size() > 1) {
+            cell.removeParagraph(cell.getParagraphs().size() - 1);
+        }
+        
+        if (!para.getRuns().isEmpty()) {
+            XWPFRun run = para.getRuns().get(0);
+            // 文本设为首个run的内容（通过底层DOM，避免POI侧效应）
+            CTR ctr = run.getCTR();
+            try {
+                org.w3c.dom.Element ctrElem = (org.w3c.dom.Element) ctr.getDomNode();
+                // 清空所有子节点，重建完整run结构
+                while (ctrElem.getFirstChild() != null) {
+                    ctrElem.removeChild(ctrElem.getFirstChild());
+                }
+                // rPr
+                org.w3c.dom.Element rPr = ctrElem.getOwnerDocument().createElementNS(NS_WORD, "w:rPr");
+                ctrElem.appendChild(rPr);
+                // rFonts（仅非中文数据需要Times New Roman）
+                if (value != null && !containsChinese(value)) {
+                    org.w3c.dom.Element rf = ctrElem.getOwnerDocument().createElementNS(NS_WORD, "w:rFonts");
+                    rf.setAttributeNS(NS_WORD, "w:ascii", "Times New Roman");
+                    rf.setAttributeNS(NS_WORD, "w:hAnsi", "Times New Roman");
+                    rf.setAttributeNS(NS_WORD, "w:cs", "Times New Roman");
+                    rPr.appendChild(rf);
+                }
+                // sz（固定5号字=21 half-pt）
+                org.w3c.dom.Element sz = ctrElem.getOwnerDocument().createElementNS(NS_WORD, "w:sz");
+                sz.setAttributeNS(NS_WORD, "w:val", "21");
+                rPr.appendChild(sz);
+                // szCs
+                org.w3c.dom.Element szCs = ctrElem.getOwnerDocument().createElementNS(NS_WORD, "w:szCs");
+                szCs.setAttributeNS(NS_WORD, "w:val", "21");
+                rPr.appendChild(szCs);
+                // 文本（w:t）
+                org.w3c.dom.Element t = ctrElem.getOwnerDocument().createElementNS(NS_WORD, "w:t");
+                t.setTextContent(value != null ? value : "");
+                ctrElem.appendChild(t);
+            } catch (Exception e) {
+                // fallback: POI API
+                while (!para.getRuns().isEmpty()) para.removeRun(0);
+                XWPFRun newRun = para.createRun();
+                newRun.setText(value != null ? value : "");
+            }
+            
+            // 删除多余的run
+            while (para.getRuns().size() > 1) {
+                para.removeRun(para.getRuns().size() - 1);
+            }
+        } else {
+            XWPFRun run = para.createRun();
+            run.setText(value != null ? value : "");
+            run.setColor("000000");
+            setSzInRun(run.getCTR(), 21);
+        }
+    }
+
+    /** 在保存前统一修正：遍历所有表格单元格，统一字号为5号(10.5pt=21)，非中文设Times New Roman */
+    private void fixNonChineseFonts(XWPFDocument document) {
+        try {
+            CTBody body = document.getDocument().getBody();
+            for (CTTbl cttbl : body.getTblArray()) {
+                for (CTRow row : cttbl.getTrArray()) {
+                    for (CTTc cell : row.getTcArray()) {
+                        for (CTP ctp : cell.getPArray()) {
+                            for (CTR ctr : ctp.getRArray()) {
+                                String text = "";
+                                for (int k = 0; k < ctr.sizeOfTArray(); k++) {
+                                    text += ctr.getTArray(k).getStringValue();
+                                }
+                                if (text.isEmpty()) continue;
+                                
+                                // 1. 统一字号为5号（21 half-pt = 10.5pt）
+                                setSzInRun(ctr, 21);
+                                
+                                // 2. 非中文内容设Times New Roman
+                                if (!containsChinese(text)) {
+                                    try {
+                                        if (!ctr.isSetRPr()) ctr.addNewRPr();
+                                        org.w3c.dom.Element ctrElem = (org.w3c.dom.Element) ctr.getDomNode();
+                                        org.w3c.dom.NodeList children = ctrElem.getChildNodes();
+                                        org.w3c.dom.Element rPrElem = null;
+                                        for (int i = 0; i < children.getLength(); i++) {
+                                            if ("rPr".equals(children.item(i).getLocalName())) {
+                                                rPrElem = (org.w3c.dom.Element) children.item(i);
+                                                break;
+                                            }
+                                        }
+                                        if (rPrElem == null) {
+                                            rPrElem = ctrElem.getOwnerDocument().createElementNS(NS_WORD, "w:rPr");
+                                            ctrElem.insertBefore(rPrElem, ctrElem.getFirstChild());
+                                        }
+                                        org.w3c.dom.NodeList fontsNodes = rPrElem.getChildNodes();
+                                        org.w3c.dom.Element rf = null;
+                                        for (int i = 0; i < fontsNodes.getLength(); i++) {
+                                            if ("rFonts".equals(fontsNodes.item(i).getLocalName())) {
+                                                rf = (org.w3c.dom.Element) fontsNodes.item(i);
+                                                break;
+                                            }
+                                        }
+                                        if (rf == null) {
+                                            rf = ctrElem.getOwnerDocument().createElementNS(NS_WORD, "w:rFonts");
+                                            if (rPrElem.getFirstChild() != null) {
+                                                rPrElem.insertBefore(rf, rPrElem.getFirstChild());
+                                            } else {
+                                                rPrElem.appendChild(rf);
+                                            }
+                                        }
+                                        rf.setAttributeNS(NS_WORD, "w:ascii", "Times New Roman");
+                                        rf.setAttributeNS(NS_WORD, "w:hAnsi", "Times New Roman");
+                                        rf.setAttributeNS(NS_WORD, "w:cs", "Times New Roman");
+                                    } catch (Exception ignored) {}
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        } catch (Exception e) {
+            System.err.println("fixNonChineseFonts error: " + e.getMessage());
+        }
+    }
+
+    /** 判断字符串是否包含中文 */
+    private boolean containsChinese(String text) {
+        return text.codePoints().anyMatch(cp -> Character.UnicodeScript.of(cp) == Character.UnicodeScript.HAN);
     }
     
     /**
