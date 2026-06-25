@@ -14,7 +14,7 @@ public class TableConfig {
     
     private static final String CONFIG_FILE = "table-config.properties";
     private static TableConfig instance;
-    private final Properties properties;
+    private Properties properties;
     
     // 默认值
     private static final String DEFAULT_TESTCASE_REQUIRED_COLUMN = "模块编号";

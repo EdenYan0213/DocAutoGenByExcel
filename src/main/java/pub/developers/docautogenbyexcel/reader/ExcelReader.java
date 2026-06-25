@@ -43,14 +43,13 @@ public class ExcelReader {
         
         try (FileInputStream fis = new FileInputStream(file);
              Workbook workbook = new XSSFWorkbook(fis)) {
-
+            
             // 自动搜索包含必填列的Sheet
             Sheet sheet = null;
-            String foundSheetName;
+            String foundSheetName = null;
             List<String> columnNames = new ArrayList<>();
             Map<String, Integer> columnIndexMap = new HashMap<>();
-
-            // 遍历所有Sheet找到测试用例Sheet
+            
             for (int sheetIdx = 0; sheetIdx < workbook.getNumberOfSheets(); sheetIdx++) {
                 Sheet candidateSheet = workbook.getSheetAt(sheetIdx);
                 if (candidateSheet == null || candidateSheet.getPhysicalNumberOfRows() == 0) {
@@ -91,6 +90,8 @@ public class ExcelReader {
                 System.out.println("未找到包含'" + requiredColumn + "'列的Sheet，跳过测试用例处理（将只处理基本信息、列表型表格等）");
                 return moduleDataMap; // 返回空的Map，继续处理其他类型的表格
             }
+            
+            Row headerRow = sheet.getRow(0);
 
             // 读取数据行
             int totalRows = sheet.getPhysicalNumberOfRows();

@@ -32,12 +32,16 @@ public class ConfigLoader {
             
             if (outputPath == null || outputPath.trim().isEmpty()) {
                 // 默认输出路径为Excel文件同目录
-                int lastIndex = excelPath.lastIndexOf('/');
-                if (lastIndex == -1) {
-                    lastIndex = excelPath.lastIndexOf('\\');
-                }
-                if (lastIndex != -1) {
-                    outputPath = excelPath.substring(0, lastIndex + 1);
+                if (excelPath != null) {
+                    int lastIndex = excelPath.lastIndexOf('/');
+                    if (lastIndex == -1) {
+                        lastIndex = excelPath.lastIndexOf('\\');
+                    }
+                    if (lastIndex != -1) {
+                        outputPath = excelPath.substring(0, lastIndex + 1);
+                    } else {
+                        outputPath = "./";
+                    }
                 } else {
                     outputPath = "./";
                 }
