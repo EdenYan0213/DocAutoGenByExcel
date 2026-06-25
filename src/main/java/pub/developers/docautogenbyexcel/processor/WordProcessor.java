@@ -83,6 +83,12 @@ public class WordProcessor {
     // 模板格式缓存
     private SubSectionFormat templateSubSectionFormat = null;
     private CaptionFormat templateCaptionFormat = null;
+
+    // 样式ID → 样式名 映射缓存（每次 processWord 调用前刷新）
+    // Word模板可能使用非MSOffice默认的styleId（例如20代表heading 2），
+    // 直接按数字集匹配会漏判；这里改为以样式名为权威依据。
+    private final java.util.Map<String, String> styleIdToName = new java.util.HashMap<>();
+    private transient XWPFDocument currentDoc = null;
     
     // ==================== 目录编号辅助方法 ====================
     
@@ -114,36 +120,44 @@ public class WordProcessor {
     // ==================== 样式判断辅助方法 ====================
     
     /** 判断是否为目录样式 */
-    private static boolean isTocStyle(String styleName) {
-        return styleName != null && 
-            (TOC_STYLES.contains(styleName) || styleName.toLowerCase().startsWith("toc"));
+    private boolean isTocStyle(String styleId) {
+        if (styleId == null) return false;
+        if (TOC_STYLES.contains(styleId)) return true;
+        String name = resolveStyleName(styleId);
+        String lower = (name != null ? name : styleId).toLowerCase();
+        return lower.startsWith("toc");
     }
-    
+
     /** 判断是否为标题样式（包括Heading 1-4） */
-    private static boolean isHeadingStyle(String styleName) {
-        return styleName != null && 
-            (HEADING_STYLES.contains(styleName) || 
-             styleName.toLowerCase().contains("heading") ||
-             styleName.contains("标题") ||
-             styleName.contains("程序标题"));
+    private boolean isHeadingStyle(String styleId) {
+        if (styleId == null) return false;
+        if (HEADING_STYLES.contains(styleId)) return true;
+        String name = resolveStyleName(styleId);
+        if (name == null) return false;
+        String lower = name.toLowerCase();
+        return lower.contains("heading") || name.contains("标题") || name.contains("程序标题");
     }
-    
+
     /** 判断是否为主章节样式（Heading 1 或 Heading 2） */
-    private static boolean isMainSectionStyle(String styleName) {
-        return styleName != null && 
-            (styleName.equals("2") || styleName.equals("3") || 
-             styleName.toLowerCase().contains("heading 1") ||
-             styleName.toLowerCase().contains("heading 2") ||
-             styleName.contains("标题 1") || styleName.contains("标题 2"));
+    private boolean isMainSectionStyle(String styleId) {
+        if (styleId == null) return false;
+        if (styleId.equals("2") || styleId.equals("3")) return true;
+        String name = resolveStyleName(styleId);
+        if (name == null) return false;
+        String lower = name.toLowerCase();
+        return lower.contains("heading 1") || lower.contains("heading 2") ||
+               name.contains("标题 1") || name.contains("标题 2");
     }
-    
+
     /** 判断是否为子章节样式（Heading 3 或 Heading 4） */
-    private static boolean isSubSectionStyle(String styleName) {
-        return styleName != null && 
-            (styleName.equals("4") || styleName.equals("5") ||
-             styleName.toLowerCase().contains("heading 3") || 
-             styleName.toLowerCase().contains("heading 4") ||
-             styleName.contains("标题 3") || styleName.contains("程序标题"));
+    private boolean isSubSectionStyle(String styleId) {
+        if (styleId == null) return false;
+        if (styleId.equals("4") || styleId.equals("5")) return true;
+        String name = resolveStyleName(styleId);
+        if (name == null) return false;
+        String lower = name.toLowerCase();
+        return lower.contains("heading 3") || lower.contains("heading 4") ||
+               name.contains("标题 3") || name.contains("程序标题");
     }
     
     // ==================== 通用辅助方法 ====================
@@ -210,6 +224,9 @@ public class WordProcessor {
         
         try (FileInputStream fis = new FileInputStream(templatePath);
              XWPFDocument document = new XWPFDocument(fis)) {
+
+            // 刷新样式ID→样式名映射，用于后续章节/题注样式识别
+            populateStyleIdToName(document);
 
             // 先扫描Word文档中的所有章节编号、占位符和已存在的子章节
             List<String> wordSectionNumbers = scanWordSections(document);
@@ -781,10 +798,41 @@ public class WordProcessor {
     }
     
     /** 判断是否为Caption样式 */
-    private static boolean isCaptionStyle(String styleName) {
-        return styleName != null && (styleName.equalsIgnoreCase("Caption") ||
-            styleName.equals("11") || styleName.equals("15") || styleName.contains("题注") ||
-            styleName.toLowerCase().contains("caption"));
+    private boolean isCaptionStyle(String styleId) {
+        if (styleId == null) return false;
+        if (styleId.equalsIgnoreCase("Caption") || styleId.equals("11") || styleId.equals("15") ||
+            styleId.contains("题注") || styleId.toLowerCase().contains("caption")) {
+            return true;
+        }
+        String name = resolveStyleName(styleId);
+        if (name == null) return false;
+        return name.equalsIgnoreCase("Caption") || name.contains("题注") || name.toLowerCase().contains("caption");
+    }
+
+    /** 记录当前正在处理的文档并清空样式映射缓存（后续resolveStyleName会惰性解析） */
+    private void populateStyleIdToName(XWPFDocument document) {
+        this.currentDoc = document;
+        this.styleIdToName.clear();
+    }
+
+    /** 根据styleId解析样式名（兼容20=heading 2等非默认模板编号方案） */
+    private String resolveStyleName(String styleId) {
+        if (styleId == null || styleId.isEmpty()) return null;
+        return styleIdToName.computeIfAbsent(styleId, k -> {
+            try {
+                if (currentDoc != null) {
+                    org.apache.poi.xwpf.usermodel.XWPFStyles styles = currentDoc.getStyles();
+                    if (styles != null) {
+                        org.apache.poi.xwpf.usermodel.XWPFStyle s = styles.getStyle(k);
+                        if (s != null) {
+                            String name = s.getName();
+                            if (name != null && !name.isEmpty()) return name;
+                        }
+                    }
+                }
+            } catch (Exception ignored) {}
+            return k;
+        });
     }
 
     /**
