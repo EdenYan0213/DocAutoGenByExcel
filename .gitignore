@@ -31,3 +31,28 @@ build/
 
 ### VS Code ###
 .vscode/
+
+### Python (调试脚本缓存) ###
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+
+### 临时调试文件 ###
+tmp_*.txt
+inspect_*.py
+verify_*.py
+generated_for_template.xlsx
+
+### 工作运行时目录 ###
+output/
+test_output/
+storage/
+.sisyphus/
+
+### 输入测试文件（保留在本地，不入库） ###
+2 号文档完整填充模板*.xlsx
+2-XX*.docx
+1-XX*.docx
+test_data_*.xlsx
+2号文档完整填充模板*.xlsx
